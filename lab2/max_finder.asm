@@ -1,12 +1,30 @@
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+; | LAB #2: Assembly programming, GPIO                              |
+; |                                                                 |
+; | AUTHOR: Daniel Hamilton                                         |
+; |                                                                 |
 ; | SUMMARY: max_finder.asm                                         |
+; | This file contains code from programs in Lab 2, parts II - IV.  |
+; | A value stored in memory determines which part of the lab is    |
+; | run when loading to the board.                                  |
+; |                                                                 |
+; | PT II:                                                          |
 ; | This program searches through a vector of signed "test scores"  |
 ; | ranging from 0-100 and stores the highest grade in the max_addr |
 ; |                                                                 |
-; | REGISTER USE:                                                   |
-; | XAR0 - input argument A for subroutines                         |
-; | XAR1 - input argument B for subroutines                         |
-; | XAR2 - temp register                                            |
+; | PT III:                                                         |
+; | This program plays a short pattern on the LEDs using a short    |
+; | software delay.                                                 |
+; |                                                                 |
+; | PT IV:                                                          |
+; | This program allows the user to control the output of the codec |
+; | LEDs by using the codec buttons and switches.                   |
+; |                                                                 |
+; |                                                                 |
+; | FILE USAGE:                                                     |
+; | Setting the "ASSIGNMENT_PART" value in the REFERENCES section   |
+; | for values between 1-3 will run the program written for the     |
+; | lab's assignments Part 2-4.                                     |
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
 
 	.global _c_int00
@@ -18,31 +36,62 @@
 	.ref score_addr			; stores an *address* to the vector
 	.ref score_vector_len	; stores the length of the score vector
 	.ref max_addr			; stores an *address* to the max value
-	.def s_or_u				; selects whether comparing signed or unsigned
+
+; +=================================================================+
+; |=================================================================|
+; |=================================================================|
+; |=================================================================|
+; +=================================================================+
+; |                                                                 |
+; | 					  ASSIGNMENT_PART:                          |
+; | 					1 => Lab 2, Part II                         |
+; | 					2 => Lab 2, Part III                        |
+; | 					3 => Lab 2, Part IV                         |
+; |                                                                 |
+; +-----------------------------------------------------------------+
+ASSIGNMENT_PART .set 	1
+; +-----------------------------------------------------------------+
+; |=================================================================|
+; |=================================================================|
+; |=================================================================|
+; +=================================================================+
 
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
-; |                         DATA ALLOCATION                         |
+; |                              MACROS                             |
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
 
-ASSIGNMENT_PART .set 	3
-CMP_SIGNED 		.set 	0
-CMP_UNSIGNED 	.set 	1
+; Sets active-low LEDs to "SET" value.
+; Ex. SET = #0xFFFE, means LED 0 is on.
+setLeds .macro SET
+		PUSH 	XAR6
+		MOVL 	XAR6, 	#GPIO_DAT_A
+		MOV 	*XAR6, 	SET
+		POP 	XAR6
+		.endm
+
+; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+; |                            REFERENCES                           |
+; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+
+CMP_SIGNED 		.set 0
+CMP_UNSIGNED 	.set 1
 
 GPIO_CTRL_REGS	.set 0x7C00
 GPIO_DATA_REGS 	.set 0x7F00
 
-GPIO_DIR_A 		.set GPIO_CTRL_REGS + 0x0A
-GPIO_MUX1_A 	.set GPIO_CTRL_REGS + 0x06
-GPIO_GMUX1_A 	.set GPIO_CTRL_REGS + 0x20
-GPIO_DAT_A 		.set GPIO_DATA_REGS + 0x00
-GPIO_PUD_A 		.set GPIO_CTRL_REGS + 0x0C
-GPIO_SET_A 		.set GPIO_DATA_REGS + 0x02
-GPIO_CLR_A		.set GPIO_DATA_REGS + 0x04
+GPIO_DIR_A      .set GPIO_CTRL_REGS + 0x0A
+GPIO_MUX1_A     .set GPIO_CTRL_REGS + 0x06
+GPIO_GMUX1_A    .set GPIO_CTRL_REGS + 0x20
+GPIO_DAT_A      .set GPIO_DATA_REGS + 0x00
+GPIO_PUD_A      .set GPIO_CTRL_REGS + 0x0C
+GPIO_SET_A      .set GPIO_DATA_REGS + 0x02
+GPIO_CLR_A      .set GPIO_DATA_REGS + 0x04
 ; ----------------------------------------
 
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
-; |                           REFERENCES                            |
+; |                         DATA ALLOCATION                         |
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+	.data
 
 ; selects whether comparing signed or unsigned
 ; 0 => signed compare
@@ -121,34 +170,19 @@ PART2: ; ***********************************************************************
 
 part2_loop:
 
-		; ----
-		MOVL XAR6, #GPIO_DAT_A
-		MOV  *XAR6, #0x00FF
-
+		setLeds #0x00FF
 		LC SW_DELAY
 
-		; ----
-		MOVL XAR6, #GPIO_DAT_A
-		MOV  *XAR6, #0x00FC
-
+		setLeds #0x00FC
 		LC SW_DELAY
 
-		; ----
-		MOVL XAR6, #GPIO_DAT_A
-		MOV  *XAR6, #0x00F3
-
+		setLeds #0x00F3
 		LC SW_DELAY
 
-		; ----
-		MOVL XAR6, #GPIO_DAT_A
-		MOV  *XAR6, #0x00CF
-
+		setLeds #0x00CF
 		LC SW_DELAY
 
-		; ----
-		MOVL XAR6, #GPIO_DAT_A
-		MOV  *XAR6, #0x003F
-
+		setLeds #0x003F
 		LC SW_DELAY
 
 		; loop pattern forever
@@ -243,10 +277,13 @@ part3_loop:
 ; ===================================================================
 SUB_COMP_MAX:
 	PUSH 	AL
+	PUSH	AH
+	PUSH 	AR0
 
 	; ---------------------------------------------------------------
 	; determine if the inputs are signed or unsigned 16-bit values
-	CMP     @s_or_u,        #CMP_SIGNED
+	MOV		AR0,			#s_or_u
+	CMP     *AR0,        	#CMP_SIGNED
 	B       j_signed,       EQ		; if configured to compare as signed numbers, jump.
 	B       j_unsigned,     UNC 	; if configured to compare as unsigned numbers, jump.
 
@@ -254,14 +291,21 @@ j_signed: ; signed comparison ---------------------------------------
 	MOV 	AL,             *XAR6       ; move input argument to ACC so comparison can be done.
 	MOV 	AH,				*XAR2 	    ; loads address of test value into ACC for comparison.
 	CMP     AL,      		AH			; test value - max value <= 0 means test value is NOT new max value
-	B		j_exit, 		LEQ
+	B		j_exit, 		LEQ 		; less than or equal - used for signed comparison
 	MOV   	*AR2,      		AL			; store the new max value to the max address if greater.
 	B       j_exit,         UNC
 
 j_unsigned: ; unsigned comparison -----------------------------------
+	MOV 	AL,             *XAR6       ; move input argument to ACC so comparison can be done.
+	MOV 	AH,				*XAR2 	    ; loads address of test value into ACC for comparison.
+	CMP     AL,      		AH			; test value - max value <= 0 means test value is NOT new max value
+	B		j_exit, 		LOS			; lower or same - used for unsigned comparison
+	MOV   	*AR2,      		AL			; store the new max value to the max address if greater.
 	B       j_exit,         UNC
 
 j_exit:
+	POP AR0
+	POP AH
     POP AL
     LRET
 
@@ -301,7 +345,7 @@ sw_delay_loop:
 
 sw_nested_delay:
 	push 	ACC
-	MOV 	ACC, #10
+	MOV 	ACC, #100
 
 sw_nested_delay_loop:
 	SUB 	ACC, #1

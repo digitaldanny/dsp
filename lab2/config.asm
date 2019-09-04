@@ -10,12 +10,17 @@ score_addr:
 	.word 1
 	.word 96
 	.word 67
+	.word -1 ; testing signed vs unsigned, 0xFFFF in hex
+	.word 75
+	.word 79
+	.word 100
+	.word 0
 
 max_addr:
 	.word 0x0000
 
 score_vector_len:
-	.word 5
+	.word 10
 
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
 ; |                           TEST PROGRAM                          |
