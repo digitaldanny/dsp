@@ -272,17 +272,3 @@ EQUATION:
 
 	POP XAR0
 	LRET
-
-
-
-
-
-
-
-
-
-
-
-
-
-
