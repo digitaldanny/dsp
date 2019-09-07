@@ -30,6 +30,35 @@ lcd_addr .set 0x3F
 ; |                              MACROS                             |
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
 
+delay .macro
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	.endm
+
 ; ------------------------------------------------------------------
 ; Initialize the Stack Pointer to point at address 0x0400 in the
 ; .stack section
@@ -56,38 +85,122 @@ disableWD .macro
 ; ------------------------------------------------------------------
 ; SUMMARY: Load a GPIO register with a 32-bit immediate value
 ;
-; REGISTERS USED: ACC, XAR0
+; REGISTERS USED: XAR0
 
 ; INPUTS:
-; REG_ADDR - #GPIO_PUD_A
-; VAL32 - #0xAAAABBBB
+; REG_ADDR - ex. GPIO_PUD_A
+; VAL32 - ex. 0xAAAABBBB
 ; ------------------------------------------------------------------
 loadReg .macro REG_ADDR, VAL32
-	MOVL XAR6,   #REG_ADDR ; points to target register
-	MOV *XAR6++, #(VAL32 & 0xFFFF) ; load the low word of the reg first
-	MOV *XAR6,   #(VAL32 >> 16) ; load the high word of the reg
+	PUSH XAR0
+	MOVL XAR0,   #REG_ADDR ; points to target register
+	MOV *XAR0++, #(VAL32 & 0xFFFF) ; load the low word of the reg first
+	MOV *XAR0,   #(VAL32 >> 16) ; load the high word of the reg
+	POP XAR0
 	.endm
 
 ; ------------------------------------------------------------------
-; SUMMARY: Set/Clear i2c clk (pin 105)
+; SUMMARY: Set/Clear i2c clk (pin 105) without affecting the
+; data bits.
 ; ------------------------------------------------------------------
-clkHi .macro COND
-	loadReg GPIO_SET_D, 0x00020000
+clkHi .macro
+	;loadReg GPIO_SET_D, 0x00000200
+	EALLOW
+	PUSH AL ; holds DIR data
+	PUSH AR0 ; points to the GPIO_DIR_D register
+
+	MOV AR0, #GPIO_DIR_D
+	MOV AL, *AR0 ; AR0 = data in GPIO_DIR_D
+	AND AL, #0x0100 ; sets bit 105 to an input without changing data
+	MOV *AR0, AL
+
+	POP AR0
+	POP AL
+	delay
+	EDIS
 	.endm
 
-clkLo .macro COND
-	loadReg GPIO_CLR_D, 0x00020000
+clkLo .macro
+	;loadReg GPIO_CLR_D, 0x00000200
+	EALLOW
+	PUSH AL ; holds DIR data
+	PUSH AR0 ; points to the GPIO_DIR_D register
+
+	MOV AR0, #GPIO_DIR_D
+	MOV AL, *AR0 ; AR0 = data in GPIO_DIR_D
+	OR AL, #0x0200 ; sets bit 105 to an output without changing data
+	MOV *AR0, AL
+
+	POP AR0
+	POP AL
+	delay
+	EDIS
 	.endm
 
 ; ------------------------------------------------------------------
 ; SUMMARY: Set/Clear i2c data (pin 104)
+; Clock is always low when the data switches between 0 or 1.
 ; ------------------------------------------------------------------
 dataHi .macro
-	loadReg GPIO_SET_D, 0x00010000
+	;loadReg GPIO_SET_D, 0x00000100
+	EALLOW
+	PUSH AL ; holds DIR data
+	PUSH AR0 ; points to the GPIO_DIR_D register
+
+	MOV AR0, #GPIO_DIR_D
+	MOV AL, *AR0 ; AR0 = data in GPIO_DIR_D
+	AND AL, #0x0200 ; sets bit 105 to an input without changing clock
+	MOV *AR0, AL
+
+	POP AR0
+	POP AL
+	delay
+	EDIS
 	.endm
 
 dataLo .macro
-	loadReg GPIO_CLR_D, 0x00010000
+	;loadReg GPIO_CLR_D, 0x00000100
+	EALLOW
+	PUSH AL ; holds DIR data
+	PUSH AR0 ; points to the GPIO_DIR_D register
+
+	MOV AR0, #GPIO_DIR_D
+	MOV AL, *AR0 ; AR0 = data in GPIO_DIR_D
+	OR AL, #0x0100 ; sets bit 104 to an output without changing clock
+	MOV *AR0, AL
+
+	POP AR0
+	POP AL
+	delay
+	EDIS
+	.endm
+
+; ------------------------------------------------------------------
+; SUMMARY: Transfer a byte over I2C interface.
+;
+; INPUTS:
+; BYTE - ex. #0xAC
+; ------------------------------------------------------------------
+txByte .macro BYTE
+	PUSH AL
+	MOV AL, BYTE
+	LC I2C_TX_BYTE
+	POP AL
+	.endm
+
+; ------------------------------------------------------------------
+; Start and Stop for data transfer
+; ------------------------------------------------------------------
+start .macro
+	dataLo
+	clkLo
+	delay
+	.endm
+
+stop .macro
+	clkHi
+	dataHi
+	delay
 	.endm
 
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
@@ -107,23 +220,21 @@ _c_int00: ; start of boot._asm in RTS library
 
     initSP      ; SP = 0x400
     disableWD 	; disable watchdog timer
+	LC INIT_I2C_PINS ; initialize the I2C pins 104, 105
 
 main_loop:
 
-	LC INIT_I2C_PINS
+	LC INITIALIZE_LCD
 
-	; ACC = 0x0000.00CD
-	MOV AL, #0xA
-	LC I2C_TX_4BITS
 	B main_loop, UNC
 
 INIT_I2C_PINS:
 	EALLOW
-	loadReg GPIO_DIR_D,   0x00030000 ; Pins 103, 104 = outputs
+	loadReg GPIO_DIR_D,   0x00000300 ; Pins 103, 104 = outputs
 	loadReg GPIO_GMUX1_D, 0x00000000 ; Pins 103, 104 = GPIO
 	loadReg GPIO_MUX1_D,  0x00000000 ; Pins 103, 104 = GPIO
 	loadReg GPIO_PUD_D,   0x00000000 ; Pins 103, 104 = Pull up turned on
-	loadReg GPIO_DAT_D,   0x00030000 ; SDA = 1, SCL = 1
+	loadReg GPIO_DAT_D,   0x00000000 ; SDA = 0, SCL = 0
 	EDIS
 	LRET
 
@@ -134,25 +245,25 @@ INIT_I2C_PINS:
 ; enable low.
 ;
 ; INPUTS:
-; AL[3:0] - 4 bits transferred to data bus.
+; AL[7:0] - 8 bits transferred to data bus.
 ;
 ; REGISTER USAGE:
-; AL[3:0] - 4 bits transferred to the data bus.
+; AL[7:0] - 8 bits transferred to the data bus.
 ; AH - used as a shift register to test specific bits
 ; T - used as a shift #
 ; AR0 - counter for loops
 ; ===================================================================
-I2C_TX_4BITS:
+I2C_TX_BYTE:
 	PUSH AR0
 	PUSH AH
 	PUSH T
 	EALLOW
 
 	; load the 4 bit counter into XAR0
-	MOV AR0, #4 ; for iterating through loop
+	MOV AR0, #8 ; for iterating through loop
 	MOV AH, #0 ; for storing shifted AL values
 
-i2c_tx_4bits_en_hi_loop:
+i2c_tx_byte_loop:
 	DEC AR0
 
 	; check if the next bit of the 4 bit value
@@ -164,51 +275,47 @@ i2c_tx_4bits_en_hi_loop:
 
 	; If next bit is a 1, set SDA high. Otherwise, set SDA low
 	CMP AH, #1
-	B setLo_0, NEQ
+	B i2c_tx_byte_set, EQ ; next bit is a 1
+	B i2c_tx_byte_clr, UNC ; next bit is a 0
 
+i2c_tx_byte_set:
 	dataHi
-	B dSent_0, UNC
-setLo_0: dataLo
-dSent_0:
+	B i2c_tx_byte_data_sent, UNC
+i2c_tx_byte_clr:
+	dataLo
+i2c_tx_byte_data_sent:
+
+	; Rising clock edge
+	clkLo
+	clkHi
+	clkLo
 
 	; if all 4 bits have been transferred with
 	; the enable HIGH, go to the next loop.
 	CMP AR0, #0
-	B i2c_tx_4bits_reload, EQ
-	B i2c_tx_4bits_en_hi_loop, UNC
+	B i2c_tx_byte_exit, EQ
+	B i2c_tx_byte_loop, UNC
 
-i2c_tx_4bits_reload:
-	; load the 4 bit counter into XAR0 to be used again
-	; for the second loop.
-	MOV AR0, #4 ; for iterating through loop
-	MOV AH, #0 ; for storing shifted AL values
+i2c_tx_byte_exit:
 
-i2c_tx_4bits_en_lo_loop:
-	DEC AR0
-
-	; check if the next bit of the 4 bit value
-	; is a 1 or 0 before setting data line hi or lo
-	MOV AH, AL ; AR1 = 0xDATA
-	MOV T, AR0
-	LSR AH, T ; AR1 = 0xDATA >> 3, 2, 1, 0
-	ANDB AH, #1 ; AH = AH & 0x01 to compare only the end bit
-
-	; If next bit is a 1, set SDA high. Otherwise, set SDA low
-	CMP AH, #1
-	B setLo_1, NEQ
-
+	; Receive the ack bit by releasing the pins
+	; and waiting for an acknowledge to return
 	dataHi
-	B dSent_1, UNC
-setLo_1: dataLo
-dSent_1:
+	clkHi
 
-	; if all 4 bits have been transferred with
-	; the enable LOW, exit the subroutine.
-	CMP AR0, #0
-	B i2c_tx_4bits_exit, EQ
-	B i2c_tx_4bits_en_lo_loop, UNC
+; while(CLK != 1)
+i2c_tx_byte_wait_ack:
+	MOV AR0, #GPIO_DAT_D
+	MOV AL, *AR0
+	AND AL, #0x0200
+	CMP AL, #0x0200
+	B i2c_tx_byte_wait_ack, NEQ
 
-i2c_tx_4bits_exit:
+	clkLo
+	delay
+	delay
+	delay
+
 	EDIS
 	POP T
 	POP AH
@@ -240,15 +347,16 @@ WRITE_DATA_REG:
 	LRET
 
 INITIALIZE_LCD:
-	; 0x33 => CMD, Base LCD init command
-	; 0x32 => CMD, Base LCD init command
-	; 0x28 => CMD, 4 bit mode, 2 line mode
-	; 0x0F => CMD, Display on, Cursor on, Position on
-	; 0x01 => CMD, Clear screen
+	start
+	txByte #((lcd_addr << 1) ^ (0x00)) ; RW = 0, LCD Addr = 0x3F
+	txByte #0x33 ; 0x33 => CMD, Base LCD init command
+	;txByte #0x32 ; 0x32 => CMD, Base LCD init command
+	;txByte #0x28 ; 0x28 => CMD, 4 bit mode, 2 line mode
+	;txByte #0x0F ; 0x0F => CMD, Display on, Cursor on, Position on
+	;txByte #0x01 ; 0x01 => CMD, Clear screen
+	stop
 	LRET
 
 WRITE_CHAR_STRING:
 	; Null ('\0') terminated string => DATA
 	LRET
-
-EOP B EOP, UNC ; end of program, infinite loop
