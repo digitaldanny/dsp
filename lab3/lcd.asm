@@ -32,19 +32,10 @@ lcd_addr .set 0x3F
 
 delay .macro
 	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
-	LC SW_DELAY
+	;LC SW_DELAY
+	;LC SW_DELAY
+	;LC SW_DELAY
+	;LC SW_DELAY
 	.endm
 
 ; ------------------------------------------------------------------
@@ -164,7 +155,21 @@ dataLo .macro
 	.endm
 
 ; ------------------------------------------------------------------
-; SUMMARY: Transfer a byte over I2C interface.
+; Start and Stop for data transfer
+; ------------------------------------------------------------------
+start .macro
+	dataLo
+	clkLo
+	.endm
+
+stop .macro
+	clkHi
+	dataHi
+	.endm
+
+; ------------------------------------------------------------------
+; SUMMARY: Transfer a byte over I2C interface without knowledge
+; of 4-bit transfer mode. This is an immediate load.
 ;
 ; INPUTS:
 ; BYTE - ex. #0xAC
@@ -177,24 +182,85 @@ txByte .macro BYTE
 	.endm
 
 ; ------------------------------------------------------------------
-; Start and Stop for data transfer
+; SUMMARY: Transfer a byte over I2C interface to the LCD WITH knowledge
+; of 4-bit transfer mode. This is an immediate load.
+;
+; INPUTS:
+; BYTE - ex. #0xAC
 ; ------------------------------------------------------------------
-start .macro
-	dataLo
-	clkLo
-	delay
+txByteLCD .macro BYTE
+	PUSH AL
+	MOV AL, BYTE
+	LC LCD_TX_BYTE
+	POP AL
 	.endm
 
-stop .macro
-	clkHi
-	dataHi
-	delay
+; ------------------------------------------------------------------
+; SUMMARY: Transfer a byte over I2C interface WITH knowledge
+; of 4-bit transfer mode. This is an immediate load.
+;
+; INPUTS:
+; CHAR/CMD - #'A'
+; ------------------------------------------------------------------
+wrDataImm .macro CHAR
+	PUSH AL
+	MOV AL, CHAR
+	LC WRITE_DATA_REG
+	POP AL
+	.endm
+
+wrCmdImm .macro CMD
+	PUSH AL
+	MOV AL, CMD
+	LC WRITE_COMMAND_REG
+	POP AL
+	.endm
+
+; ------------------------------------------------------------------
+; SUMMARY: Store the string into memory, then read the memory to
+; output characters to LCD.
+;
+; INPUTS:
+; STRING - "Hello world"
+;
+; OUTPUTS:
+; AR0 - points to beginning of the string
+; ------------------------------------------------------------------
+writeString .macro STRING
+
+	.endm
+
+lcdRow1 .macro
+	MOV AL, #(0x80 ^ 0x00)	; row 2 offset = 0x40, row 1 offset = 0x00
+	LC WRITE_COMMAND_REG 	; go to home line
+	.endm
+
+lcdRow2 .macro
+	MOV AL, #(0x80 ^ 0x40)	; row 2 offset = 0x40, row 1 offset = 0x00
+	LC WRITE_COMMAND_REG 	; go to home line
+	.endm
+
+lcdCursorBlinkOff .macro
+	MOV AL, #0x0E
+	LC WRITE_COMMAND_REG
+	.endm
+
+lcdCursorBlinkOn .macro
+	MOV AL, #0x0F
+	LC WRITE_COMMAND_REG
 	.endm
 
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
 ; |                         DATA ALLOCATION                         |
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
 	.sect .data
+
+stringA:
+	.word "Daniel Hamilton"
+	.word '\0'
+stringB:
+	.word "EEL4511"
+	.word '\0'
 
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
 ; |                         PROGRAM MEMORY                          |
@@ -209,13 +275,28 @@ _c_int00: ; start of boot._asm in RTS library
     initSP      ; SP = 0x400
     disableWD 	; disable watchdog timer
 	LC INIT_I2C_PINS ; initialize the I2C pins 104, 105
+	LC INITIALIZE_LCD ; set to 4 bit mode, init screen
+	;lcdCursorBlinkOff
 
-main_loop:
+	; Writes out "Daniel Hamilton" on the first line
+	MOV AL, #stringA
+	LC WRITE_CHAR_STRING
 
-	LC INITIALIZE_LCD
+	lcdRow2 ; sets cursor to second row of the lcd
 
-	B main_loop, UNC
+	; Writes out "EEL4511" on the second line
+	MOV AL, #stringB
+	LC WRITE_CHAR_STRING
 
+	;writeString "Hamilton"
+
+EOP	B EOP, UNC
+
+; ===================================================================
+; SUMMARY: INIT_I2C_PINS
+; This subroutine initializes pins 104 and 105 to work for bit-banging
+; I2C for the LCD.
+; ===================================================================
 INIT_I2C_PINS:
 	EALLOW
 	loadReg GPIO_DIR_D,   0x00000300 ; Pins 103, 104 = outputs
@@ -224,13 +305,13 @@ INIT_I2C_PINS:
 	loadReg GPIO_PUD_D,   0x00000000 ; Pins 103, 104 = Pull up turned on
 	loadReg GPIO_DAT_D,   0x00000000 ; SDA = 0, SCL = 0
 	EDIS
+	stop
 	LRET
 
 ; ===================================================================
-; SUMMARY: I2C_TX_4BITS
-; This subroutine transfers 4-bits using the I2C backpack for the LCD.
-; The 4 bits are transferred out with the enable high, then again with the
-; enable low.
+; SUMMARY: I2C_TX_BYTE
+; This subroutine transfers 8-bits using the I2C backpack. This subroutine
+; works WITHOUT knowledge of 4-bit mode, enable, RS, or RW.
 ;
 ; INPUTS:
 ; AL[7:0] - 8 bits transferred to data bus.
@@ -310,43 +391,146 @@ i2c_tx_byte_exit:
 	LRET
 
 ; ===================================================================
-	; 100 - 400 KHz clock speed
-
-	; Upper nibble w/ Enable HIGH
-	; Upper nibble w/ Enable LOW
-
-	; Lower nibble w/ Enable HIGH
-	; Lower nibble w/ Enable LOW
-
-	; R/~W bit always LOW
-
-	; LED bit on, backlight stays on
-
-	; RS => 1 when we write data
-	; RS => 0 when we write commands
+; SUMMARY: WRITE_COMMAND_REG
+; Write a byte to the command registers (RS = 0).
+;
+; REGISTERS AFFECTED:
+; AL - Input byte
 ; ===================================================================
 WRITE_COMMAND_REG:
-	; RS => 0 to write commands
+	PUSH AR0
+	MOV AR0, AL ; copy original byte for later use
+	start
+	txByte #((lcd_addr << 1) ^ (0x00)) ; send i2c address - RW = 0, LCD Addr = 0x3F
+
+	; Upper nibble transfer
+	; ---------------------------------------------------------------
+
+	; Enable high
+	AND AL, #0xF0 	; 0xAB & 0xF0 = 0xA0, makes sure that theres only 4 bits transferring
+	OR AL, #0x0C	; 0xAC = upper nibble tx, RS = 0, back light on, enable HIGH, RW low
+	LC I2C_TX_BYTE
+
+	; Enable low
+	MOV AL, AR0
+	AND AL, #0xF0 	; 0xAB & 0xF0 = 0xA0, makes sure that theres only 4 bits transferring
+	OR AL, #0x08	; 0xB8 = upper nibble tx, RS = 0, back light on, enable LOW, RW low
+	LC I2C_TX_BYTE
+
+	; Lower nibble transfer
+	; ---------------------------------------------------------------
+
+	; Enable high
+	MOV AL, AR0
+	LSL AL, #4		; 0xAB << 4 = 0xB0, shifts lower nibble into D7-D4 pins
+	AND AL, #0xF0 	; 0xB0 & 0xF0 = 0xB0, makes sure that theres only 4 bits transferring
+	OR AL, #0x0C	; 0xB8 = upper nibble tx, RS = 0, back light on, enable HIGH, RW low
+	LC I2C_TX_BYTE
+
+	; Enable low
+	MOV AL, AR0
+	LSL AL, #4		; 0xAB << 4 = 0xB0, shifts lower nibble into D7-D4 pins
+	AND AL, #0xF0 	; 0xB0 & 0xF0 = 0xB0, makes sure that theres only 4 bits transferring
+	OR AL, #0x08	; 0xB8 = upper nibble tx, RS = 0, back light on, enable LOW, RW low
+	LC I2C_TX_BYTE
+
+	stop
+	POP AR0
 	LRET
 
+; ===================================================================
+; SUMMARY: WRITE_DATA_REG
+; Write a byte to the data registers (RS = 1).
+;
+; REGISTERS AFFECTED:
+; AL - Input byte
+; ===================================================================
 WRITE_DATA_REG:
-	; RS => 1 to write data
+	PUSH AR0
+	MOV AR0, AL ; copy original byte for later use
+	start
+	txByte #((lcd_addr << 1) ^ (0x00)) ; send i2c address - RW = 0, LCD Addr = 0x3F
+
+	; Upper nibble transfer
+	; ---------------------------------------------------------------
+
+	; Enable high
+	AND AL, #0xF0 	; 0xAB & 0xF0 = 0xA0, makes sure that theres only 4 bits transferring
+	OR AL, #0x0D	; 0xAC = upper nibble tx, RS = 1, back light on, enable HIGH, RW low
+	LC I2C_TX_BYTE
+
+	; Enable low
+	MOV AL, AR0
+	AND AL, #0xF0 	; 0xAB & 0xF0 = 0xA0, makes sure that theres only 4 bits transferring
+	OR AL, #0x09	; 0xB8 = upper nibble tx, RS = 1, back light on, enable LOW, RW low
+	LC I2C_TX_BYTE
+
+	; Lower nibble transfer
+	; ---------------------------------------------------------------
+
+	; Enable high
+	MOV AL, AR0
+	LSL AL, #4		; 0xAB << 4 = 0xB0, shifts lower nibble into D7-D4 pins
+	AND AL, #0xF0 	; 0xB0 & 0xF0 = 0xB0, makes sure that theres only 4 bits transferring
+	OR AL, #0x0D	; 0xB8 = upper nibble tx, back light on, enable HIGH, RW low
+	LC I2C_TX_BYTE
+
+	; Enable low
+	MOV AL, AR0
+	LSL AL, #4		; 0xAB << 4 = 0xB0, shifts lower nibble into D7-D4 pins
+	AND AL, #0xF0 	; 0xB0 & 0xF0 = 0xB0, makes sure that theres only 4 bits transferring
+	OR AL, #0x09	; 0xB8 = upper nibble tx, back light on, enable LOW, RW low
+	LC I2C_TX_BYTE
+
+	stop
+	POP AR0
 	LRET
 
+; ===================================================================
+; SUMMARY: WRITE_DATA_REG
+; Sets LCD in 4-bit, 2 line mode.. clears screen, turns display and
+; cursor on.
+; ===================================================================
 INITIALIZE_LCD:
+	delay
+	delay
+	delay
+
 	start
 	txByte #((lcd_addr << 1) ^ (0x00)) ; RW = 0, LCD Addr = 0x3F
-	txByte #0x01
-	;txByte #0x33 ; 0x33 => CMD, Base LCD init command
-	;txByte #0x32 ; 0x32 => CMD, Base LCD init command
-	;txByte #0x28 ; 0x28 => CMD, 4 bit mode, 2 line mode
-	;txByte #0x0F ; 0x0F => CMD, Display on, Cursor on, Position on
-	;txByte #0x01 ; 0x01 => CMD, Clear screen
+	wrCmdImm #0x33 ; 0x33 => CMD, Base LCD init command
+	wrCmdImm #0x32 ; 0x32 => CMD, Base LCD init command
+	wrCmdImm #0x28 ; 0x28 => CMD, 4 bit mode, 2 line mode
+	wrCmdImm #0x0F ; 0x0F => CMD, Display on, Cursor on, Position on
+	wrCmdImm #0x01 ; 0x01 => CMD, Clear screen
 	stop
+
 	LRET
 
+; ===================================================================
+; SUMMARY: WRITE_DATA_REG
+; Writes NULL ('\0') terminated string from memory out to the LCD.
+;
+; INPUTS: AL - pointer to beginning of the string (not used as a pointer
+; 	throughout subroutine).
+; ===================================================================
 WRITE_CHAR_STRING:
-	; Null ('\0') terminated string => DATA
+	PUSH AR0
+	MOV AR0, AL	; move address into a pointer register
+
+write_char_string_loop:
+	; Exit if NULL character found. Otherwise, output the next
+	; character.
+	MOV AL, *AR0	; load the next character from the string
+	CMP AL, #'\0'
+	B write_char_string_exit, EQ
+
+	INC AR0			; point to the next character
+	LC WRITE_DATA_REG ; send character to LCD
+	B write_char_string_loop, UNC
+
+write_char_string_exit:
+	POP AR0
 	LRET
 
 ; ===================================================================
@@ -354,12 +538,12 @@ WRITE_CHAR_STRING:
 ; This subroutine delays for a large # of clock cycles.
 ; ===================================================================
 SW_DELAY:
-	push 	ACC
-	MOV		ACC, #0xFF
+	push 	AL
+	MOV		AL, #0x1F
 
 sw_delay_loop:
-	SUB 	ACC, #1
+	SUB 	AL, #1
 	BF 		sw_delay_loop, GEQ
 
-	pop 	ACC
+	pop 	AL
 	LRET
