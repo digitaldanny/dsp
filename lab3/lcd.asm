@@ -31,32 +31,20 @@ lcd_addr .set 0x3F
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
 
 delay .macro
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
+	LC SW_DELAY
 	.endm
 
 ; ------------------------------------------------------------------
@@ -298,20 +286,19 @@ i2c_tx_byte_data_sent:
 
 i2c_tx_byte_exit:
 
-	; Receive the ack bit by releasing the pins
-	; and waiting for an acknowledge to return
-	dataHi
+	dataHi ; release to see if acknowledge is received
+
+	delay ; delays waiting for the I2C device to process
+	delay
+	delay
+	delay
+
+	clkLo ; clock in the acknowledge
 	clkHi
-
-; while(CLK != 1)
-i2c_tx_byte_wait_ack:
-	MOV AR0, #GPIO_DAT_D
-	MOV AL, *AR0
-	AND AL, #0x0200
-	CMP AL, #0x0200
-	B i2c_tx_byte_wait_ack, NEQ
-
 	clkLo
+
+	; required delay between transfers
+	delay
 	delay
 	delay
 	delay
@@ -349,7 +336,8 @@ WRITE_DATA_REG:
 INITIALIZE_LCD:
 	start
 	txByte #((lcd_addr << 1) ^ (0x00)) ; RW = 0, LCD Addr = 0x3F
-	txByte #0x33 ; 0x33 => CMD, Base LCD init command
+	txByte #0x01
+	;txByte #0x33 ; 0x33 => CMD, Base LCD init command
 	;txByte #0x32 ; 0x32 => CMD, Base LCD init command
 	;txByte #0x28 ; 0x28 => CMD, 4 bit mode, 2 line mode
 	;txByte #0x0F ; 0x0F => CMD, Display on, Cursor on, Position on
@@ -359,4 +347,19 @@ INITIALIZE_LCD:
 
 WRITE_CHAR_STRING:
 	; Null ('\0') terminated string => DATA
+	LRET
+
+; ===================================================================
+; SUMMARY: SW_DELAY
+; This subroutine delays for a large # of clock cycles.
+; ===================================================================
+SW_DELAY:
+	push 	ACC
+	MOV		ACC, #0xFF
+
+sw_delay_loop:
+	SUB 	ACC, #1
+	BF 		sw_delay_loop, GEQ
+
+	pop 	ACC
 	LRET
