@@ -37,6 +37,8 @@
 	.ref score_vector_len	; stores the length of the score vector
 	.ref max_addr			; stores an *address* to the max value
 
+	.ref Quiz_Values, Quiz_Values_Length, Min_Value, Max_Value
+
 ; +=================================================================+
 ; |=================================================================|
 ; |=================================================================|
@@ -47,9 +49,11 @@
 ; | 					1 => Lab 2, Part II                         |
 ; | 					2 => Lab 2, Part III                        |
 ; | 					3 => Lab 2, Part IV                         |
+; |                     4 => Quiz practice                          |
+; |                     5 => Real Quiz                              |
 ; |                                                                 |
 ; +-----------------------------------------------------------------+
-ASSIGNMENT_PART .set 	1
+ASSIGNMENT_PART .set 	5
 ; +-----------------------------------------------------------------+
 ; |=================================================================|
 ; |=================================================================|
@@ -60,14 +64,75 @@ ASSIGNMENT_PART .set 	1
 ; |                              MACROS                             |
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
 
+loadMax .macro VAL32
+	PUSH XAR0
+	MOVL XAR0,   #Max_Value ; points to target register
+	MOV *XAR0++, #(VAL32 & 0xFFFF) ; load the low word of the reg first
+	MOV *XAR0,   #(VAL32 >> 16) ; load the high word of the reg
+	POP XAR0
+	.endm
+
+loadMin .macro VAL32
+	PUSH XAR0
+	MOVL XAR0,   #Min_Value ; points to target register
+	MOV *XAR0++, #(VAL32 & 0xFFFF) ; load the low word of the reg first
+	MOV *XAR0,   #(VAL32 >> 16) ; load the high word of the reg
+	POP XAR0
+	.endm
+
 ; Sets active-low LEDs to "SET" value.
 ; Ex. SET = #0xFFFE, means LED 0 is on.
 setLeds .macro SET
-		PUSH 	XAR6
-		MOVL 	XAR6, 	#GPIO_DAT_A
-		MOV 	*XAR6, 	SET
-		POP 	XAR6
-		.endm
+	PUSH 	XAR6
+	MOVL 	XAR6, 	#GPIO_DAT_A
+	MOV 	*XAR6, 	SET
+	POP 	XAR6
+	.endm
+
+initLeds .macro
+	; dir
+	; GPIO [7:0] - outputs
+	; GPIO [31:8] - inputs
+	MOVL 	XAR6, #GPIO_DIR_A
+	MOV  	*XAR6++, #0x00FF
+	MOV 	*XAR6, #0x0000
+
+	; gmux1 - GPIO mode
+	MOVL XAR6, #GPIO_GMUX1_A
+	MOV  *XAR6++, #0x0000
+	MOV	*XAR6, #0x0000
+
+	; mux1
+	MOVL XAR6, #GPIO_MUX1_A
+	MOV  *XAR6++, #0x0000
+	MOV	*XAR6, #0x0000
+
+	; pullup - All input pullups are turned off
+	MOVL XAR6, #GPIO_PUD_A
+	MOV  *XAR6++, #0x0000
+	MOV	*XAR6, #0x0000
+	.endm
+
+debounceB0 .macro
+	PUSH AL
+	MOV AL, #1
+	LC DEBOUNCE
+	POP AL
+	.endm
+
+debounceB1 .macro
+	PUSH AL
+	MOV AL, #2
+	LC DEBOUNCE
+	POP AL
+	.endm
+
+debounceB2 .macro
+	PUSH AL
+	MOV AL, #3
+	LC DEBOUNCE
+	POP AL
+	.endm
 
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
 ; |                            REFERENCES                           |
@@ -86,7 +151,6 @@ GPIO_DAT_A      .set GPIO_DATA_REGS + 0x00
 GPIO_PUD_A      .set GPIO_CTRL_REGS + 0x0C
 GPIO_SET_A      .set GPIO_DATA_REGS + 0x02
 GPIO_CLR_A      .set GPIO_DATA_REGS + 0x04
-; ----------------------------------------
 
 ; +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
 ; |                         DATA ALLOCATION                         |
@@ -110,7 +174,7 @@ _c_int00: ; start of boot._asm in RTS library
 
 		; Move the stack pointer to valid RAM location
 		EALLOW ; enable protected register write
-		MOV 	SP, #0x8400
+		MOV 	SP, #0x0400
 		EDIS ; disable protected register write
 
 		LC DISABLE_WATCHDOG
@@ -122,7 +186,11 @@ _c_int00: ; start of boot._asm in RTS library
 			.if ASSIGNMENT_PART == 2
 				B PART2, UNC
 			.else
-				B PART3, UNC
+				.if ASSIGNMENT_PART == 3
+					B PART3, UNC
+				.else
+					B PART5, UNC
+				.endif
 			.endif
 		.endif
 
@@ -188,7 +256,7 @@ part2_loop:
 		; loop pattern forever
 		B 	part2_loop, UNC
 
-PART3:
+PART3: ; ***********************************************************************************
 
 		EALLOW
 
@@ -256,6 +324,229 @@ part3_loop:
 
 		B part3_loop, UNC
 
+PART4: ; ***********************************************************************************
+		EALLOW
+		initLeds
+
+		; AL - GPIO 15:0
+		; AH - GPIO 31:16
+		MOVL XAR0, #GPIO_DAT_A
+		MOV	*XAR0, #0xFFFF ; initialize LEDs to be off
+		MOVL XAR1, #GPIO_DAT_A
+		INC AR1
+
+part4_loop:
+
+		; load in the new button values
+		MOV AL, *XAR0
+		MOV AH, *XAR1
+		NOT AL
+		NOT AH
+
+		; check if the reset button was hit first
+		MOV AR2, AL ; backup for GPIO 15:0
+		AND AL, #0x8000
+		CMP AL, #0x8000
+		B RESET, EQ
+
+		; check if the increment button (PB0) was hit first
+		MOV AL, AR2 ; move the backup into the ACC register
+		AND AL, #0x4000
+		CMP AL, #0x4000
+		B INCREMENT, EQ
+
+		; check if the decrement button (PB2) was hit first
+		AND AH, #0x0001
+		CMP AH, #0x0001
+		B DECREMENT, EQ
+		B part4_loop, UNC
+RESET:
+		debounceB1
+		MOV *XAR0, #0xFFFF ; all LEDs turn off
+		B part4_exit, UNC
+
+INCREMENT:
+		debounceB0
+		MOV AL, *XAR0
+		NOT AL		; 0xFFFF => 0x0000
+		INC AL		; 0x0000 => 0x0001
+		NOT AL 		; 0x0001 => 0xFFFE
+		mov *XAR0, AL
+		B part4_exit, UNC
+
+DECREMENT:
+		debounceB2
+		MOV AL, *XAR0
+		NOT AL		; 0xFFFF => 0x0000
+		DEC AL		; 0x0000 => 0x0001
+		NOT AL 		; 0x0001 => 0xFFFE
+		mov *XAR0, AL
+		B part4_exit, UNC
+
+part4_exit:
+		B part4_loop, UNC
+
+PART5: ; ***********************************************************************************
+
+		EALLOW
+		MOVL 	XAR0, 	#Quiz_Values_Length 	; load the vector length into this register to be decremented later
+		MOVL 	XAR1, 	#Quiz_Values 	    ; score vector POINTER
+		MOVL 	XAR2, 	#Max_Value 			; max value POINTER
+		MOVL	XAR3, 	#Min_Value			; min value pointer
+
+		; initialize the max/min value
+		loadMax 0x00000000
+		loadMin 0xFFFFFFFF
+
+part5_min_max_loop:
+		; ---------------------------------------------------------------------------------
+		DEC		*XAR0				; decrement number of values remaining in the vector
+		MOVL 	XAR6, 	XAR1       	; move the next score in the vector to the input argument register
+
+		; ---------------------------------------------------------------------------------
+		; load the max value into the ACC to be tested
+		MOV AL, *XAR1 ; load the low word of the next test value
+		INC AR1
+		MOV AH, *XAR1 ; load the high word of the next test value
+		INC AR1		; prepare for next iteration
+
+CompMax:
+		MOV	DP, #0x280 ; #Max_Value>>6 ; compare with the next 32-bit number
+		CMPL ACC, @Max_Value ; compare the current max value with the ACC test value
+
+		B CompMin, LOS ; if the old max value is higher or the same, skip to comparing as min
+		MOV *XAR2, AL; store the new max value
+		INC AR2 ; point to high word
+		MOV *XAR2, AH ; store high part of new max value
+		DEC AR2 ; prepare for next iteration
+
+CompMin:
+		; load the max value to be tested
+		MOV	DP, #0x280 ; #Min_Value>>6
+		CMPL ACC, @Min_Value ; compare the current min value with the ACC value
+
+		B NextValue, HIS ; if the old min value is lower or the same, skip to next value
+		MOV *XAR3, AL; store the new max value
+		INC AR3 ; point to high word
+		MOV *XAR3, AH ; store high part of new max value
+		DEC AR3 ; prepare for next iteration
+
+		B 		NextValue, UNC
+
+	    ; ---------------------------------------------------------------------------------
+NextValue:
+
+		; if there are no more values remaining in the vector, continue to part 2.
+		; ---------------------------------------------------------------------------------
+		CMP		*AR0, 	#0
+		B		part5_min_max_loop,	NEQ
+
+; -----------------------------------------------------------------------------------------
+
+		; AL - GPIO 15:0
+		; AH - GPIO 31:16
+		EALLOW
+		initLeds
+		MOVL XAR0, #GPIO_DAT_A
+		MOV	*XAR0, #0xFFFF ; initialize LEDs to be off
+		MOVL XAR1, #GPIO_DAT_A
+		INC AR1
+
+part5_echo_loop:
+
+		; load in the new button values
+		MOV AL, *XAR0
+		MOV AH, *XAR1
+		NOT AL
+		NOT AH
+
+		; check if the middle button was hit first
+		MOV AR2, AL ; backup for GPIO 15:0
+		AND AL, #0x8000
+		CMP AL, #0x8000
+		B MIDDLE, EQ
+
+		; check if the right button (PB0) was hit first
+		MOV AL, AR2 ; move the backup into the ACC register
+		AND AL, #0x4000
+		CMP AL, #0x4000
+		B RIGHT, EQ
+
+		; check if the left button (PB2) was hit first
+		AND AH, #0x0001
+		CMP AH, #0x0001
+		B LEFT, EQ
+		B part5_echo_loop, UNC
+
+MIDDLE: ; echo switches on both sides
+		PUSH AR2
+		PUSH AL
+		PUSH AH
+
+		; Read data from switches, bitwise-AND them
+		; with the LEDs that should be affected by switches.
+		MOV 	AL, 	AR2 	; AL = GPIO[15:0]
+		AND 	AL, 	#0x0F00 ; AND with bits 11:8 to store in LEDs
+		MOV 	T, 		#8 		; number of bits to shift accumulator right by
+		LSR 	AL, 	T		; shift bits 11:8 into bits 3:0
+
+		MOV 	AH, 	AR2 	; AL = GPIO[15:0]
+		AND 	AH, 	#0x0F00 ; AND with bits 11:8 to store in LEDs
+		MOV 	T, 		#4 		; number of bits to shift accumulator right by
+		LSR 	AH, 	T		; shift bits 11:8 into bits 7:4
+
+		OR		AL, AH			; combine for GPIO 7:0
+		MOV 	*XAR0, AL ; push the shifted values into LEDs
+
+		POP AH
+		POP AL
+		POP AR2
+		B part5_exit, UNC
+
+RIGHT: ; echo switches on GPIO 3:0
+		PUSH AR2
+		PUSH AL
+		PUSH AH
+
+		; Read data from switches, bitwise-AND them
+		; with the LEDs that should be affected by switches.
+		MOV 	AL, 	AR2 	; AL = GPIO[15:0]
+		AND 	AL, 	#0x0F00 ; AND with bits 11:8 to store in LEDs
+		MOV 	T, 		#8 		; number of bits to shift accumulator right by
+		LSR 	AL, 	T		; shift bits 11:8 into bits 3:0
+		OR		AL, 	#0x00F0 ; clear bits 7:4
+
+		OR		AL, AH			; combine for GPIO 7:0
+		MOV 	*XAR0, AL ; push the shifted values into LEDs
+
+		POP AH
+		POP AL
+		POP AR2
+		B part5_exit, UNC
+
+LEFT: ; echo switches on GPIO 7:4
+		PUSH AR2
+		PUSH AL
+		PUSH AH
+
+		; Read data from switches, bitwise-AND them
+		; with the LEDs that should be affected by switches.
+		MOV 	AL, 	AR2 	; AL = GPIO[15:0]
+		AND 	AL, 	#0x0F00 ; AND with bits 11:8 to store in LEDs
+		MOV 	T, 		#4 		; number of bits to shift accumulator right by
+		LSR 	AL, 	T		; shift bits 11:8 into bits 7:4
+		OR		AL, 	#0x000F ; clear bits 3:0
+
+		OR		AL, AH			; combine for GPIO 7:0
+		MOV 	*XAR0, AL ; push the shifted values into LEDs
+
+		POP AH
+		POP AL
+		POP AR2
+		B part5_exit, UNC
+
+part5_exit:
+		B part5_echo_loop, UNC
 ; ===================================================================
 ; SUMMARY: SUB_COMP_MAX
 ; This subroutine compares two values and outputs the larger of the
@@ -352,6 +643,60 @@ sw_nested_delay_loop:
 	BF 		sw_nested_delay_loop, GEQ
 
 	pop 	ACC
+	LRET
+
+; ===================================================================
+; SUMMARY: DEBOUNCE - debounces selected push button.
+; INPUTS: AL - #1:PB0, #2:PB1, #3:PB2
+; ===================================================================
+DEBOUNCE:
+	PUSH AL
+	PUSH AR0
+	MOV AR0, #GPIO_DAT_A ; points at the button/switch register
+
+	CMP AL, #1 			; debounce button 0
+	B debounce_b0, EQ
+	CMP AL, #2 			; debounce button 1
+	B debounce_b1, EQ
+	B debounce_b2, UNC 	; debounce button 2
+
+debounce_b0:
+	MOV AL, *AR0 ; loads AR0 <= GPIO 15:0
+	LC SDELAY ; wait for button to finish bouncing
+	CMP AL, #0x4000 ; check if the button has gone high yet
+	B debounce_b0, EQ
+	B debounce_exit, UNC
+
+debounce_b1:
+	MOV AL, *AR0 ; loads AR0 <= GPIO 15:0
+	LC SDELAY ; wait for button to finish bouncing
+	CMP AL, #0x8000 ; check if the button has gone high yet
+	B debounce_b1, EQ
+	B debounce_exit, UNC
+
+debounce_b2:
+	INC AR0 ; points at the upper word of the button/switch register
+	MOV AL, *AR0 ; loads AR0 <= GPIO 15:0
+	LC SDELAY ; wait for button to finish bouncing
+	CMP AL, #0x0001 ; check if the button has gone high yet
+	B debounce_b2, EQ
+	B debounce_exit, UNC
+
+debounce_exit:
+	POP AR0
+	POP AL
+	LRET
+
+; ===================================================================
+; SUMMARY: SDELAY - short delay used for debouncing.
+; ===================================================================
+SDELAY:
+	push 	AL
+	MOV		AL, #0xFFFF
+sdelay_loop:
+	SUB 	AL, #1
+	BF 		sdelay_loop, GEQ
+	pop 	AL
 	LRET
 
 ; ===================================================================
