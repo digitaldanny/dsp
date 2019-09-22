@@ -64,14 +64,14 @@ disableWD .macro
 in_addr: .long 0x00008100		; location input vector will be stored
 out_addr: .long 0x00008200 	; location output vector will be stored
 
-; -2.4 : 0.1 : 2.5
-in_start_value: .float -2.4
-in_step_value:  .float 0.1
+; -10.0 : 0.4 : 10.0
+in_start_value: .float -10.0
+in_step_value:  .float 0.4
 in_vector_len:  .word 50
 
 ; line data -- Y = Ax + B
-A: .float 0.311
-B: .float -0.181
+A: .float 1.575
+B: .float -15.75
 
 ; Temprorary storage address for subroutines
 sub_temp .usect ".ebss", 1
@@ -89,7 +89,7 @@ _c_int00: ; start of boot._asm in RTS library
     initSP      ; SP = 0x400
     disableWD 	; disable watchdog timer
 
-    ; generate the input vector -2.4 : 0.1 : 2.5
+    ; generate the input vector -10.0 : 0.4 : 10.0
     ; ---------------------------------------------------------------
     MOVL XAR0, #in_start_value ; address to float
     PUSH XAR0
@@ -164,7 +164,7 @@ gen_input_vector_loop:
 	MOV32 *XAR1++, R0H ; input_vector[i] = nextValue
 	DEC *XAR2
 
-	ADDF32 R0H, R0H, R1H ; nextValue = currentValue + 0.1
+	ADDF32 R0H, R0H, R1H ; nextValue = currentValue + 0.4
 	NOP ; align the pipelines
 
 	; after 50 numbers have been generated, stop.
