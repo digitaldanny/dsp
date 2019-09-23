@@ -495,6 +495,9 @@ INITIALIZE_LCD:
 	delay
 	delay
 	delay
+	delay
+	delay
+	delay
 
 	start
 	txByte #((lcd_addr << 1) ^ (0x00)) ; RW = 0, LCD Addr = 0x3F
@@ -505,6 +508,12 @@ INITIALIZE_LCD:
 	wrCmdImm #0x01 ; 0x01 => CMD, Clear screen
 	stop
 
+	delay
+	delay
+	delay
+	delay
+	delay
+	delay
 	LRET
 
 ; ===================================================================
@@ -539,7 +548,7 @@ write_char_string_exit:
 ; ===================================================================
 SW_DELAY:
 	push 	AL
-	MOV		AL, #0x1F
+	MOV		AL, #0x3FF
 
 sw_delay_loop:
 	SUB 	AL, #1
