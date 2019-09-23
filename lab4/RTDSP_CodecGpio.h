@@ -5,8 +5,8 @@
  *      Author: Daniel Hamilton
  */
 
-#ifndef SRC_RTDSP_GPIO_H_
-#define SRC_RTDSP_GPIO_H_
+#ifndef SRC_RTDSP_CODEC_GPIO_H_
+#define SRC_RTDSP_CODEC_GPIO_H_
 
 #include "F28x_Project.h"
 #include "driverlib.h"

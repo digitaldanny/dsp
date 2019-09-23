@@ -5,7 +5,7 @@
  *      Author: Daniel Hamilton
  */
 
-#include "RTDSP_Gpio.h"
+#include "RTDSP_CodecGpio.h"
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+

@@ -9,6 +9,7 @@
 #ifndef _RTDSP
 #define _RTDSP
 
-#include "RTDSP_Gpio.h"
+#include "RTDSP_CodecGpio.h"
+#include "OneToOneI2CDriver.h"
 
 #endif

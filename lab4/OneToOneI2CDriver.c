@@ -164,3 +164,97 @@ static void InitI2CGpio()
 
     //EDIS;
 }
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: lcdByte____
+ * This function translates LCD messages to work with the I2C
+ * backpack. The function transmits 1 nibble of the byte at a
+ * time while controlling the LCD's RS, E, etc bits.
+ *
+ * lcdByteCmd => transmits byte to command register.
+ * lcdByteData => transmit byte to data register.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void lcdByteCmd(Uint16 byte)
+{
+    // Create a byte array with the nibbles and control bits
+    // already set. This allows the SendBytes function to
+    // quickly transfer the whole byte in 1 message.
+    Uint16 const byteArray[4] =
+    {
+         (byte & 0x00F0) | 0x0C,          // upper nibble, enable high
+         (byte & 0x00F0) | 0x08,          // upper nibble, enable low
+         ((byte & 0x000F) << 4) | 0x0C,   // lower nibble, enable high
+         ((byte & 0x000F) << 4) | 0x08    // lower nibble, enable low
+    };
+
+    I2C_O2O_SendBytes((Uint16 *)&byteArray, 4);
+}
+
+void lcdByteData(Uint16 byte)
+{
+    // Create a byte array with the nibbles and control bits
+    // already set. This allows the SendBytes function to
+    // quickly transfer the whole byte in 1 message.
+    Uint16 const byteArray[4] =
+    {
+         (byte & 0x00F0) | 0x0D,          // upper nibble, enable high
+         (byte & 0x00F0) | 0x09,          // upper nibble, enable low
+         ((byte & 0x000F) << 4) | 0x0D,   // lower nibble, enable high
+         ((byte & 0x000F) << 4) | 0x09    // lower nibble, enable low
+    };
+
+    I2C_O2O_SendBytes((Uint16 *)&byteArray, 4);
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: lcdInit
+ * This function initializes the LCD to work in 4-bit 2-line
+ * mode, turn the display on, turn the cursor on, and clear
+ * the screen.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void lcdInit()
+{
+    lcdCommand(0x33); // 0x33 => CMD, Base LCD init command
+    lcdCommand(0x32); // 0x32 => CMD, Base LCD init command
+    lcdCommand(0x28); // 0x28 => CMD, 4 bit mode, 2 line mode
+    lcdCommand(0x0F); // 0x0F => CMD, Display on, Cursor on, Position on
+    lcdCommand(0x01); // 0x01 => CMD, Clear screen
+    DELAY_US(5000);
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: lcdCommand
+ * This function transfers a command value to the LCD over
+ * through an I2C backpack connected on pins 104 (SDA) and
+ * 105 (SCL).
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void lcdCommand(Uint16 cmd)
+{
+    lcdByteCmd(cmd);
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: lcdString
+ * This function transfers a string value to
+ * the LCD over through an I2C backpack connected
+ * on pins 104 (SDA) and 105 (SCL).
+ *
+ * INPUTS:
+ * <str> - pointer to the first character of the string transfer
+ * to the data register.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void lcdString(Uint16 * str)
+{
+    for (Uint16 i = 0; str[i] != '\0'; i++)
+    {
+        lcdByteData(str[i]);
+    }
+}
