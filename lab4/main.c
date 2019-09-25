@@ -121,7 +121,7 @@ void pt3_main()
     Uint16 dataRead[3] = {0,0,0};  // DEBUGGING
     while (1)
     {
-        sramVirtualWrite(0x000000, &dataWrite, 3);
+        sramVirtualWrite(0x000000, (Uint16*)&dataWrite, 3);
         sramVirtualRead(0x000000, (Uint16*)&dataRead, 3);
 
         // Interrupt causes switch between test1 and test2.

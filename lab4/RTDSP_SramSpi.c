@@ -247,12 +247,12 @@ Uint16 sramRead(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs)
  * len - number of bytes to write out
  *
  * OUTPUTS:
- * Uint16 -- error code (0 = success, -1 = failure)
+ * Uint16 -- error code (0 = success, 1 = failure)
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
 Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint16 len)
 {
-    addr <<= 2; // multiplied address to handle blocks put together
+    addr <<= 1; // multiplied address to handle blocks put together
 
     // SRAM 0
     if (addr <= 0x01FFFF)
@@ -269,8 +269,7 @@ Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint16 len)
     }
 
     // out of memory map range
-    else
-        return -1;
+    else return 1;
 }
 
 /*
@@ -287,12 +286,12 @@ Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint16 len)
  * len - number of bytes to write out
  *
  * OUTPUTS:
- * Uint16 -- error code (0 = success, -1 = failure)
+ * Uint16 -- error code (0 = success, 1 = failure)
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
 Uint16 sramVirtualRead(Uint32 addr, Uint16 * data, Uint16 len)
 {
-    addr <<= 2; // multiplied address to handle blocks put together
+    addr <<= 1; // multiplied address to handle blocks put together
 
     // SRAM 0
     if (addr <= 0x01FFFF)
@@ -309,6 +308,5 @@ Uint16 sramVirtualRead(Uint32 addr, Uint16 * data, Uint16 len)
     }
 
     // out of memory map range
-    else
-        return -1;
+    else return 1;
 }
