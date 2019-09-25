@@ -15,8 +15,10 @@
  *                   WRAPPER MACROS
  * +=====+=====+=====+=====+=====+=====+=====+=====+
  */
-#define lcdRow1()   lcdCommand(0x80 | 0x00); // moves cursor to the first line of the LCD
-#define lcdRow2()   lcdCommand(0x80 | 0x40); // moves cursor to the second line of the LCD
+#define lcdRow1()             lcdCommand(0x80 | 0x00) // moves cursor to the first line of the LCD
+#define lcdRow2()             lcdCommand(0x80 | 0x40) // moves cursor to the second line of the LCD
+#define lcdClear()            lcdCommand(0x01)        // clears the LCD screen
+#define lcdCursor(OFFSET)     lcdCommand(0x80 | CURSOR) // moves cursor to CURSOR value
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+

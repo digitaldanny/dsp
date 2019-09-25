@@ -190,6 +190,7 @@ void lcdByteCmd(Uint16 byte)
     };
 
     I2C_O2O_SendBytes((Uint16 *)&byteArray, 4);
+    DELAY_US(500);
 }
 
 void lcdByteData(Uint16 byte)
@@ -206,6 +207,7 @@ void lcdByteData(Uint16 byte)
     };
 
     I2C_O2O_SendBytes((Uint16 *)&byteArray, 4);
+    DELAY_US(500);
 }
 
 /*
@@ -223,6 +225,7 @@ void lcdInit()
     lcdCommand(0x28); // 0x28 => CMD, 4 bit mode, 2 line mode
     lcdCommand(0x0F); // 0x0F => CMD, Display on, Cursor on, Position on
     lcdCommand(0x01); // 0x01 => CMD, Clear screen
+    DELAY_US(5000);
     DELAY_US(5000);
 }
 
