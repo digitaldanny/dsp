@@ -101,7 +101,7 @@ void pt2_main()
  */
 void pt3_main()
 {
-    // local variable initializations
+    // local variable initializations ------------------------------------------------
     Uint16 slaveAddress = 0x3F;
     float32 sysClkMhz = 200.0f;
     float32 I2CClkKHz = 25.0f; // 25KHz handles LCD delay required to process commands
@@ -110,26 +110,20 @@ void pt3_main()
 
     void (*runTest)(void) = &test1; // points at the test method to be executed.
 
-    // initialization functions
+    // initialization functions ------------------------------------------------------
     InitSysCtrl(); // disable watchdog
     I2C_O2O_Master_Init(slaveAddress, sysClkMhz, I2CClkKHz);
-    //lcdInit();
+    lcdInit();
     sramSpiInit();
     interruptInit();
 
-    // debugging SRAM
+    Uint16 dataWrite[3] = {0x1234, 0xABCD, 0xA5B6};     // DEBUGGING
+    Uint16 dataRead[3] = {0,0,0};  // DEBUGGING
     while (1)
     {
-        // write data to the SRAMs
-        Uint32 addr = 0x123456;
-        Uint16 data = 0xAB;
-        sramWrite(addr, &data, 1, 0);
+        sramVirtualWrite(0x000000, &dataWrite, 3);
+        sramVirtualRead(0x000000, (Uint16*)&dataRead, 3);
 
-        sramWrite(addr, &data, 1, 1);
-    }
-
-    while (1)
-    {
         // Interrupt causes switch between test1 and test2.
         if (switchTest == 0x1)
         {
@@ -140,6 +134,11 @@ void pt3_main()
 
             switchTest = 0x0; // stops test case from switching constantly
         }
+
+        // Uint32 addr = 0x123456;
+        // Uint16 data = 0xAB;
+        // sramWrite(addr, &data, 1, 0);
+        // sramWrite(addr, &data, 1, 1);
 
         // Switches which test is being pointed at and updates
         // user with a string "Test 1" or "Test 2".

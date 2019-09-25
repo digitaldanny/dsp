@@ -41,4 +41,51 @@ Uint16 spiTransmit(Uint16 data);
  */
 void sramWrite(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs);
 
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: sramRead
+ * This function burst reads a variable number of Uint16s from
+ * the SRAM.
+ *
+ * INPUTS:
+ * addr - starting address to write data to.
+ * data - pointer to the array of Uint16's to STORE data to
+ * len - number of Uint16's to read
+ * cs - SRAM device selected
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+Uint16 sramRead(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs);
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: sramVirtualWrite
+ * This function burst writes a variable number of 16-bit
+ * values to the selected SRAM device through SPI. The
+ * virtual wrapper handles mapping the CS for SRAM0 and
+ * SRAM1 so the user can think of them as a single block.
+ *
+ * INPUTS:
+ * addr - starting address to write data to.
+ * data - pointer to the array of Uint16's to write to
+ * len - number of bytes to write out
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint16 len);
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: sramVirtualRead
+ * This function burst reads a variable number of 16-bit
+ * values from the SRAM through SPI. The virtual wrapper
+ * handles mapping the CS for SRAM0 and SRAM1 so the user
+ * can think of them as a single block.
+ *
+ * INPUTS:
+ * addr - starting address to write data to.
+ * data - pointer to the array of Uint16's to store to
+ * len - number of bytes to write out
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+Uint16 sramVirtualRead(Uint32 addr, Uint16 * data, Uint16 len);
+
 #endif /* SRC_RTDSP_SRAMSPI_H_ */

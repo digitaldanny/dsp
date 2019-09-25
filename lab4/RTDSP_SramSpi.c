@@ -98,7 +98,8 @@ Uint16 spiTransmit(Uint16 data)
     // data transmit + receive
     SpibRegs.SPIDAT = (data << 8) & 0xFF00;     // fill the buffer with left-justified data.
     while (SpibRegs.SPISTS.bit.INT_FLAG != 1);  // wait until data has been received.
-    recv = SpibRegs.SPIDAT & 0x00FF;            // Right-justified data returns
+    //recv = SpibRegs.SPIDAT & 0x00FF;            // Right-justified data returns
+    recv = SpibRegs.SPIRXBUF;
 
     /*
      * SPI FIFO TRANSMIT
@@ -115,15 +116,15 @@ Uint16 spiTransmit(Uint16 data)
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
- * SUMMARY: sramWrite16
- * This function burst writes a variable number of bytes
- * to the selected SRAM device through SPI.
+ * SUMMARY: sramWrite
+ * This function burst writes a variable number of 16-bit
+ * values to the selected SRAM device through SPI.
  *
  * INPUTS:
  * addr - starting address to write data to.
  * data - pointer to the array of Uint16's to write to
- * len -
- * cs -
+ * len - number of bytes to write out
+ * cs - SRAM device selected
  *
  * BYTE ORDER: MSB to LSB
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
@@ -139,7 +140,7 @@ void sramWrite(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs)
         GpioDataRegs.GPCCLEAR.bit.GPIO67 = 1; // select SRAM 1
 
     // instruction transfer
-    Uint16 instruction = 0x02;
+    Uint16 instruction = 0x02; // write instruction
     spiTransmit(instruction);
 
     // Transmit the address..
@@ -150,10 +151,15 @@ void sramWrite(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs)
     spiTransmit(mAddr);
     spiTransmit(lAddr);
 
-    // Transmit bursts of data..
+    // Transmit bursts of 16-bit data..
     for (int i = 0; i < len; i++)
     {
-        spiTransmit(data[i]);
+        Uint16 lByte = (data[i] >> 0) & 0x00FF;
+        Uint16 uByte = (data[i] >> 8) & 0x00FF;
+
+        spiTransmit(lByte);
+        spiTransmit(uByte);
+        // spiTransmit(data[0]);
     }
 
     // make sure all SPI slaves are disabled.
@@ -161,4 +167,148 @@ void sramWrite(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs)
     GpioDataRegs.GPCSET.bit.GPIO66 = 1; // select SRAM 0
     GpioDataRegs.GPCSET.bit.GPIO67 = 1; // select SRAM 1
     EDIS;
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: sramRead
+ * This function burst reads a variable number of Uint16s from
+ * the SRAM.
+ *
+ * INPUTS:
+ * addr - starting address to write data to.
+ * data - pointer to the array of Uint16's to STORE data to
+ * len - number of Uint16's to read
+ * cs - SRAM device selected
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+Uint16 sramRead(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs)
+{
+    EALLOW;
+
+    // Select the appropriate SPI slave to enable -------------------
+    if (cs == 0)
+        GpioDataRegs.GPCCLEAR.bit.GPIO66 = 1; // select SRAM 0
+    else
+        GpioDataRegs.GPCCLEAR.bit.GPIO67 = 1; // select SRAM 1
+
+    // instruction transfer -----------------------------------------
+    Uint16 instruction = 0x03; // read instruction
+    spiTransmit(instruction);
+
+    // Transmit the starting address..
+    Uint16 uAddr = (addr & 0x00FF0000) >> 16; // bits 24..16 of address
+    Uint16 mAddr = (addr & 0x0000FF00) >> 8; // bits 15..8 of address
+    Uint16 lAddr = (addr & 0x000000FF) >> 0; // bits 7..0 of address
+    spiTransmit(uAddr);
+    spiTransmit(mAddr);
+    spiTransmit(lAddr);
+
+    // 8 dummy cycles -------------------------------------------------
+    spiTransmit(0x7E);
+
+    // tv time handler -----------------------------------------------
+    SpibRegs.SPICCR.bit.CLKPOLARITY = 0;        // Clocks falling edge
+    SpibRegs.SPICTL.bit.CLK_PHASE   = 1;        // 1 => shifted over by 1/2 clock
+
+    // Transmit bursts of data ----------------------------------------
+    for (int i = 0; i < len; i++)
+    {
+        Uint16 lByte = spiTransmit(0x7E); // pull the lower byte, increment address
+        Uint16 uByte = spiTransmit(0x7E); // pull the upper byte
+
+        *(data + i) = ((uByte << 8) & 0xFF00) | ((lByte << 0) & 0x00FF);
+    }
+
+    // tv time handler -----------------------------------------------
+    SpibRegs.SPICCR.bit.CLKPOLARITY = 1;        // Clocks on rising edge
+    SpibRegs.SPICTL.bit.CLK_PHASE   = 0;        // 0 => clock shift corrected
+
+    // make sure all SPI slaves are disabled --------------------------
+    //DELAY_US(4); // delay allows waveforms to translate SPI
+    GpioDataRegs.GPCSET.bit.GPIO66 = 1; // select SRAM 0
+    GpioDataRegs.GPCSET.bit.GPIO67 = 1; // select SRAM 1
+    EDIS;
+
+    return 0; // no error
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: sramVirtualWrite
+ * This function burst writes a variable number of 16-bit
+ * values to the selected SRAM device through SPI. The
+ * virtual wrapper handles mapping the CS for SRAM0 and
+ * SRAM1 so the user can think of them as a single block.
+ *
+ * INPUTS:
+ * addr - starting address to write data to.
+ * data - pointer to the array of Uint16's to write to
+ * len - number of bytes to write out
+ *
+ * OUTPUTS:
+ * Uint16 -- error code (0 = success, -1 = failure)
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint16 len)
+{
+    addr <<= 2; // multiplied address to handle blocks put together
+
+    // SRAM 0
+    if (addr <= 0x01FFFF)
+    {
+        sramWrite(addr, data, len, 0);
+        return 0;
+    }
+
+    // SRAM 1
+    else if (addr <= 0x03FFFF)
+    {
+        sramWrite(addr, data, len, 1);
+        return 0;
+    }
+
+    // out of memory map range
+    else
+        return -1;
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: sramVirtualRead
+ * This function burst reads a variable number of 16-bit
+ * values from the SRAM through SPI. The virtual wrapper
+ * handles mapping the CS for SRAM0 and SRAM1 so the user
+ * can think of them as a single block.
+ *
+ * INPUTS:
+ * addr - starting address to write data to.
+ * data - pointer to the array of Uint16's to store to
+ * len - number of bytes to write out
+ *
+ * OUTPUTS:
+ * Uint16 -- error code (0 = success, -1 = failure)
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+Uint16 sramVirtualRead(Uint32 addr, Uint16 * data, Uint16 len)
+{
+    addr <<= 2; // multiplied address to handle blocks put together
+
+    // SRAM 0
+    if (addr <= 0x01FFFF)
+    {
+        sramRead(addr, data, len, 0);
+        return 0;
+    }
+
+    // SRAM 1
+    else if (addr <= 0x03FFFF)
+    {
+        sramRead(addr, data, len, 1);
+        return 0;
+    }
+
+    // out of memory map range
+    else
+        return -1;
 }
