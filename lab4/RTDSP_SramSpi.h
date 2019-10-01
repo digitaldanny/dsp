@@ -47,7 +47,7 @@ Uint16 spiTransmit(Uint16 data);
  * BYTE ORDER: MSB to LSB
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-void sramWrite(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs);
+void sramWrite(Uint32 addr, Uint16 * data, Uint32 len, Uint16 cs);
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
@@ -62,7 +62,7 @@ void sramWrite(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs);
  * cs - SRAM device selected
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-Uint16 sramRead(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs);
+Uint16 sramRead(Uint32 addr, Uint16 * data, Uint32 len, Uint16 cs);
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
@@ -78,7 +78,7 @@ Uint16 sramRead(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs);
  * len - number of bytes to write out
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint16 len);
+Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint32 len);
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
@@ -94,6 +94,6 @@ Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint16 len);
  * len - number of bytes to write out
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-Uint16 sramVirtualRead(Uint32 addr, Uint16 * data, Uint16 len);
+Uint16 sramVirtualRead(Uint32 addr, Uint16 * data, Uint32 len);
 
 #endif /* SRC_RTDSP_SRAMSPI_H_ */

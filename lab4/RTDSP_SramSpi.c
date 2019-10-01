@@ -129,7 +129,7 @@ Uint16 spiTransmit(Uint16 data)
  * BYTE ORDER: MSB to LSB
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-void sramWrite(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs)
+void sramWrite(Uint32 addr, Uint16 * data, Uint32 len, Uint16 cs)
 {
     EALLOW;
 
@@ -159,7 +159,6 @@ void sramWrite(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs)
 
         spiTransmit(lByte);
         spiTransmit(uByte);
-        // spiTransmit(data[0]);
     }
 
     // make sure all SPI slaves are disabled.
@@ -182,7 +181,7 @@ void sramWrite(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs)
  * cs - SRAM device selected
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-Uint16 sramRead(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs)
+Uint16 sramRead(Uint32 addr, Uint16 * data, Uint32 len, Uint16 cs)
 {
     EALLOW;
 
@@ -250,26 +249,62 @@ Uint16 sramRead(Uint32 addr, Uint16 * data, Uint16 len, Uint16 cs)
  * Uint16 -- error code (0 = success, 1 = failure)
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint16 len)
+Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint32 len)
 {
-    addr <<= 1; // multiplied address to handle blocks put together
+    int32 sram1Check = (int32)addr + (int32)len - (int32)SRAM1_MIN_ADDR; // must be signed for negative compare
+    int32 ovfCheck = ((int32)addr + (int32)len) - (int32)(SRAM_MAX_ADDR+1); // must be signed for negative compare
+    Uint16 err = 0;
 
-    // SRAM 0
-    if (addr <= SRAM0_MAX_ADDR)
+    addr <<= 1; // multiplied address to handle 16 bit wide blocks instead of 8 bits
+
+    /*
+     * +------------+------------+
+     * |   SRAM0    |    SRAM1   |
+     * +------------+------------+
+     *               ^ if the next write exceeds SRAM0 or SRAM1,
+     *               chop off the length and perform a recursive
+     *               call for the second SRAM. This should not cause
+     *               a stack overflow because there will be at most 2
+     *               recursive calls.
+     */
+    // ----------------------------------------------------------------
+    Uint16 recursiveHandler = 0;
+    Uint16 ovfHandler = 0;
+
+    if (ovfCheck > 0)
     {
-        sramWrite(addr, data, len, 0);
-        return 0;
+        ovfHandler = 1; // attempting to write beyond the 256K boundaries returns an error.
     }
+    else if (sram1Check > 0 && (addr>>1) < SRAM1_MIN_ADDR)
+    {
+        // shorten the length going into SRAM0 if the write isn't beginning
+        // on the SRAM1 device.
+        len -= (Uint32)sram1Check;
+        recursiveHandler = 1;
+    }
+
+    // ----------------------------------------------------------------
+    // SRAM 0
+    if (addr <= (SRAM0_MAX_ADDR<<1))
+        sramWrite(addr, data, len, 0);
 
     // SRAM 1
-    else if (addr <= SRAM1_MAX_ADDR)
-    {
+    else if (addr <= (SRAM1_MAX_ADDR<<1))
         sramWrite(addr, data, len, 1);
-        return 0;
+
+    // Overflow and recursive call handler.
+    // ---------------------------------------------------------------
+    if (ovfHandler)
+    {
+        err = 1;
+    }
+    else if (recursiveHandler)
+    {
+        Uint16 * sram1DataPtr = data + len; // address of buffer + offset
+        sramVirtualWrite(SRAM1_MIN_ADDR, sram1DataPtr, (Uint32)sram1Check);
     }
 
-    // out of memory map range
-    else return 1;
+    return err;
 }
 
 /*
@@ -289,24 +324,50 @@ Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint16 len)
  * Uint16 -- error code (0 = success, 1 = failure)
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-Uint16 sramVirtualRead(Uint32 addr, Uint16 * data, Uint16 len)
+Uint16 sramVirtualRead(Uint32 addr, Uint16 * data, Uint32 len)
 {
+    int32 sram1Check = (int32)addr + (int32)len - (int32)SRAM1_MIN_ADDR; // must be signed for negative compare
+    int32 ovfCheck = ((int32)addr + (int32)len) - (int32)(SRAM_MAX_ADDR+1); // must be signed for negative compare
+    Uint16 err = 0;
+
     addr <<= 1; // multiplied address to handle blocks put together
 
-    // SRAM 0
-    if (addr <= SRAM0_MAX_ADDR)
+    // ----------------------------------------------------------------
+    Uint16 recursiveHandler = 0;
+    Uint16 ovfHandler = 0;
+
+    if (ovfCheck > 0)
     {
-        sramRead(addr, data, len, 0);
-        return 0;
+        ovfHandler = 1; // attempting to write beyond the 256K boundaries returns an error.
     }
+    else if (sram1Check > 0 && (addr>>1) < SRAM1_MIN_ADDR)
+    {
+        // shorten the length going into SRAM0 if the write isn't beginning
+        // on the SRAM1 device.
+        len -= (Uint32)sram1Check;
+        recursiveHandler = 1;
+    }
+
+    // ----------------------------------------------------------------
+    // SRAM 0
+    if (addr <= (SRAM0_MAX_ADDR<<1))
+        sramRead(addr, data, len, 0);
 
     // SRAM 1
-    else if (addr <= SRAM1_MAX_ADDR)
-    {
+    else if (addr <= (SRAM1_MAX_ADDR<<1))
         sramRead(addr, data, len, 1);
-        return 0;
+
+    // Overflow and recursive call handler.
+    // ---------------------------------------------------------------
+    if (ovfHandler)
+    {
+        err = 1;
+    }
+    else if (recursiveHandler)
+    {
+        Uint16 * sram1DataPtr = data + len; // address of buffer + offset
+        sramVirtualRead(SRAM1_MIN_ADDR, sram1DataPtr, (Uint32)sram1Check);
     }
 
-    // out of memory map range
-    else return 1;
+    return err;
 }

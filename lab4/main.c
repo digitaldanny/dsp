@@ -119,18 +119,8 @@ void pt3_main()
     sramSpiInit();
     interruptInit();
 
-    Uint32 addr = SRAM0_MAX_ADDR;
-    Uint16 dataWrite[2] = {0x1234, 0xABCD};     // DEBUGGING
-    Uint16 dataRead[2] = {0,0};  // DEBUGGING
     while (1)
     {
-        while(1)
-        {
-            sramVirtualWrite(addr, (Uint16*)&dataWrite, 2);
-            sramRead(addr, &dataRead[0], 1, 0);
-            sramRead(addr+1, &dataRead[1], 1, 1);
-            DELAY_US(5000);
-        }
 
         // Interrupt causes switch between test1 and test2.
         if (switchTest == 0x1)
@@ -338,7 +328,7 @@ void test2()
 
             if (errorBool == 0)
             {
-                char string[] = "Inc Test No Error";
+                char string[] = "Inc Test No Err";
                 lcdString((Uint16 *)&string);
             }
             else
