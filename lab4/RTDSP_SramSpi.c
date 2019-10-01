@@ -56,9 +56,9 @@ void sramSpiInit(void)
     SpibRegs.SPICCR.bit.CLKPOLARITY = 1;        // Clocks on rising edge
     SpibRegs.SPICTL.bit.CLK_PHASE   = 0;        // 1 => shifted over by 1/2 clock
     SpibRegs.SPICCR.bit.SPICHAR     = (8-1);    // size of the data word
-    //SpibRegs.SPICCR.bit.SPILBK      = 1;        // enable spi loopback
+    //SpibRegs.SPICCR.bit.SPILBK      = 1;      // enable spi loopback
     SpibRegs.SPICTL.bit.MASTER_SLAVE = 1;       // 1 = master mode (pg. 2148)
-    SpibRegs.SPIBRR.bit.SPI_BIT_RATE = 200;     //4;   // SYSCLOCK/(PRESCALER + 1) = SPICLK (pg. 2134)
+    SpibRegs.SPIBRR.bit.SPI_BIT_RATE = 4;       // SYSCLOCK/(PRESCALER + 1) = SPICLK (pg. 2134)
     SpibRegs.SPICTL.bit.TALK = 1;               // DAT used for serial transmits (pg. 2156)
 
     // SPI FIFO CONFIGURATIONS -------------------------------------------------

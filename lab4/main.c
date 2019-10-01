@@ -1,3 +1,25 @@
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * | SUMMARY: main.c
+ * | This program contains 2 main parts (part2_main and part3_main).
+ * | Depending on whether PT2 or PT3 is defined, the selected portion
+ * | of code will be compiled and run on the board.
+ * |
+ * | part2_main:
+ * | Displays a string on the LCD using C LCD drivers located in  
+ * | OneToOneI2CDriver.
+ * |
+ * | part3_main:
+ * | This program contains 2 tests (selectable with the left button).
+ * | The first test writes out 0xAA to all SRAM locations and reads 
+ * | the data back to make sure all data was correctly written.
+ * | The second test is identical to the first test except that it 
+ * | writes incrementing values to the SRAM.
+ * | 
+ * | Pt3 tests also uses C SRAM drivers located in RTDSP_SramSpi.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */ 
+
 #include "F28x_Project.h"
 #include "driverlib.h"
 #include "device.h"
@@ -114,10 +136,21 @@ void pt3_main()
 
     // initialization functions ------------------------------------------------------
     InitSysCtrl(); // disable watchdog
+    InitSysPll(XTAL_OSC,IMULT_20,FMULT_0,PLLCLK_BY_2);
     I2C_O2O_Master_Init(slaveAddress, sysClkMhz, I2CClkKHz);
     lcdInit();
     sramSpiInit();
     interruptInit();
+
+    Uint32 tAddr = 0x001122;
+    Uint16 tData = 0xABCD;
+    while(1)
+    {
+        sramVirtualWrite(tAddr, (Uint16*)&tData, 1);
+        DELAY_US(5000);
+        sramVirtualRead(tAddr, (Uint16*)&tData, 1);
+        DELAY_US(5000);
+    }
 
     while (1)
     {
