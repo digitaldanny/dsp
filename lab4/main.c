@@ -32,6 +32,8 @@ void interruptInit();
 Uint16 switchTest = 0x0;
 Uint16 writeOrRead = 0x0;
 Uint16 recv = 0x0;
+Uint16 errorData = 0xDEAD;
+Uint32 errorAddr;
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -117,12 +119,18 @@ void pt3_main()
     sramSpiInit();
     interruptInit();
 
-    Uint16 dataWrite[3] = {0x1234, 0xABCD, 0xA5B6};     // DEBUGGING
-    Uint16 dataRead[3] = {0,0,0};  // DEBUGGING
+    Uint32 addr = SRAM0_MAX_ADDR;
+    Uint16 dataWrite[2] = {0x1234, 0xABCD};     // DEBUGGING
+    Uint16 dataRead[2] = {0,0};  // DEBUGGING
     while (1)
     {
-        sramVirtualWrite(0x000000, (Uint16*)&dataWrite, 3);
-        sramVirtualRead(0x000000, (Uint16*)&dataRead, 3);
+        while(1)
+        {
+            sramVirtualWrite(addr, (Uint16*)&dataWrite, 2);
+            sramRead(addr, &dataRead[0], 1, 0);
+            sramRead(addr+1, &dataRead[1], 1, 1);
+            DELAY_US(5000);
+        }
 
         // Interrupt causes switch between test1 and test2.
         if (switchTest == 0x1)
@@ -134,11 +142,6 @@ void pt3_main()
 
             switchTest = 0x0; // stops test case from switching constantly
         }
-
-        // Uint32 addr = 0x123456;
-        // Uint16 data = 0xAB;
-        // sramWrite(addr, &data, 1, 0);
-        // sramWrite(addr, &data, 1, 1);
 
         // Switches which test is being pointed at and updates
         // user with a string "Test 1" or "Test 2".
@@ -190,6 +193,19 @@ void test1()
     char string[] = "Test 1 Write..";
     lcdString((Uint16 *)&string);
 
+    // write 0xAA data to the SRAM
+    // ----------------------------------------------------
+    Uint16 testData = 0xAA;
+    for (Uint32 i = 0; i < SRAM_LENGTH; i++)
+        sramVirtualWrite(SRAM_MIN_ADDR + i, (Uint16*)&testData, 1);
+
+    lcdClear();
+    lcdRow1();
+    char newString[] = "Ready for Read?";
+    lcdString((Uint16 *)&newString);
+
+    // wait for the read button to be pushed
+    // ----------------------------------------------------
     while(1)
     {
         if (writeOrRead == 0x1)
@@ -201,7 +217,47 @@ void test1()
             char string[] = "Test 1 Read..";
             lcdString((Uint16 *)&string);
 
-            // Read function goes here...
+            // Read a large buffer of values in from the SRAM to test
+            // --------------------------------------------
+            Uint16 retData[128]; // buffer to reduce read time by reading larger chunks of memory
+            Uint16 testLength = 128;
+            Uint16 errorBool = 0;
+
+            for (Uint32 i = 0; i < SRAM_MAX_ADDR; i += testLength)
+            {
+                sramVirtualRead(SRAM_MIN_ADDR + i, (Uint16*)&retData, testLength);
+
+                // test that the returned buffer was equal to the test value.
+                for (Uint16 j = 0; j < testLength; j++)
+                {
+                    if (retData[j] != testData && errorBool == 0)
+                    {
+                        errorBool = 1;              // only allow the first error store to memory
+                        errorData = retData[j];     // save the error data
+                        errorAddr = SRAM_MIN_ADDR + i;  // save the error address
+                        break;
+                    }
+                }
+            }
+
+            // if the test passed, write the success message to the user
+            // otherwise, write the error message to the user.
+            // -----------------------------------------------------------------
+            lcdClear();
+            lcdRow1();
+
+            if (errorBool == 0)
+            {
+                char string[] = "0xAA OK!";
+                lcdString((Uint16 *)&string);
+            }
+            else
+            {
+                char string[] = "0xAA Error!";
+                lcdString((Uint16 *)&string);
+            }
+
+            DELAY_US(2000000); // display message for 2 seconds before returning to main loop
             lcdClear();
             break;
         }
@@ -223,6 +279,21 @@ void test2()
     char string[] = "Test 2 Write..";
     lcdString((Uint16 *)&string);
 
+    // write 0xAA data to the SRAM
+    // ----------------------------------------------------
+    for (Uint32 i = 0; i < SRAM_LENGTH; i++)
+    {
+        Uint16 testData = (Uint16)i; // truncates i when 32 bit length overflows 16 bit value
+        sramVirtualWrite(SRAM_MIN_ADDR + i, (Uint16*)&testData, 1);
+    }
+
+    lcdClear();
+    lcdRow1();
+    char newString[] = "Ready for Read?";
+    lcdString((Uint16 *)&newString);
+
+    // wait for the read button to be pushed
+    // ----------------------------------------------------
     while(1)
     {
         if (writeOrRead == 0x1)
@@ -234,7 +305,49 @@ void test2()
             char string[] = "Test 2 Read..";
             lcdString((Uint16 *)&string);
 
-            // Read function goes here...
+            // Read a large buffer of values in from the SRAM to test
+            // --------------------------------------------
+            Uint16 retData[128]; // buffer to reduce read time by reading larger chunks of memory
+            Uint16 testLength = 128;
+            Uint16 errorBool = 0;
+
+            // i = base address
+            // j = offset
+            for (Uint32 i = 0; i < SRAM_MAX_ADDR; i += testLength)
+            {
+                sramVirtualRead(SRAM_MIN_ADDR + i, (Uint16*)&retData, testLength);
+
+                // test that the returned buffer was equal to the test value.
+                for (Uint16 j = 0; j < testLength; j++)
+                {
+                    if (retData[j] != (Uint16)(i + j) && errorBool == 0)
+                    {
+                        errorBool = 1;              // only allow the first error store to memory
+                        errorData = retData[j];     // save the error data
+                        errorAddr = SRAM_MIN_ADDR + i;  // save the error address
+                        break;
+                    }
+                }
+            }
+
+            // if the test passed, write the success message to the user
+            // otherwise, write the error message to the user.
+            // -----------------------------------------------------------------
+            lcdClear();
+            lcdRow1();
+
+            if (errorBool == 0)
+            {
+                char string[] = "Inc Test No Error";
+                lcdString((Uint16 *)&string);
+            }
+            else
+            {
+                char string[] = "Inc Test Error";
+                lcdString((Uint16 *)&string);
+            }
+
+            DELAY_US(2000000); // display message for 2 seconds before returning to main loop
             lcdClear();
             break;
         }

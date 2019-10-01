@@ -255,14 +255,14 @@ Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint16 len)
     addr <<= 1; // multiplied address to handle blocks put together
 
     // SRAM 0
-    if (addr <= 0x01FFFF)
+    if (addr <= SRAM0_MAX_ADDR)
     {
         sramWrite(addr, data, len, 0);
         return 0;
     }
 
     // SRAM 1
-    else if (addr <= 0x03FFFF)
+    else if (addr <= SRAM1_MAX_ADDR)
     {
         sramWrite(addr, data, len, 1);
         return 0;
@@ -294,14 +294,14 @@ Uint16 sramVirtualRead(Uint32 addr, Uint16 * data, Uint16 len)
     addr <<= 1; // multiplied address to handle blocks put together
 
     // SRAM 0
-    if (addr <= 0x01FFFF)
+    if (addr <= SRAM0_MAX_ADDR)
     {
         sramRead(addr, data, len, 0);
         return 0;
     }
 
     // SRAM 1
-    else if (addr <= 0x03FFFF)
+    else if (addr <= SRAM1_MAX_ADDR)
     {
         sramRead(addr, data, len, 1);
         return 0;

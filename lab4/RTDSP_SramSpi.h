@@ -12,6 +12,14 @@
 #include "driverlib.h"
 #include "device.h"
 
+#define SRAM0_MIN_ADDR  0x000000
+#define SRAM0_MAX_ADDR  0x01FFFF
+#define SRAM1_MIN_ADDR  0x020000
+#define SRAM1_MAX_ADDR  0x03FFFF
+#define SRAM_MIN_ADDR   SRAM0_MIN_ADDR
+#define SRAM_MAX_ADDR   SRAM1_MAX_ADDR
+#define SRAM_LENGTH     SRAM1_MAX_ADDR + 1
+
 void sramSpiInit(void);
 
 /*
