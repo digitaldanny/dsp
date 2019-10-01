@@ -30,7 +30,7 @@
  *                      CONFIGURATIONS
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  */
-#define PT3
+#define QUIZ
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -39,6 +39,7 @@
  */
 void pt2_main();
 void pt3_main();
+void quiz_main();
 void test1();
 void test2();
 interrupt void ISR_rightButton(void);
@@ -77,6 +78,10 @@ void main(void)
 #ifdef PT3
     pt3_main();
 #endif
+
+#ifdef QUIZ
+    quiz_main();
+#endif
 }
 
 /*
@@ -111,6 +116,48 @@ void pt2_main()
 
     // EOP -- infinite loop
     while (1) {DELAY_US(100);}
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY:
+ * Fill SRAM with a string.. read the string back and
+ * display on the LCD.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void quiz_main()
+{
+    // local variable initializations ------------------------------------------------
+    Uint16 slaveAddress = 0x3F;
+    float32 sysClkMhz = 200.0f;
+    float32 I2CClkKHz = 25.0f; // 25KHz handles LCD delay required to process commands
+
+    // initialization functions ------------------------------------------------------
+    InitSysCtrl(); // disable watchdog
+    InitSysPll(XTAL_OSC,IMULT_20,FMULT_0,PLLCLK_BY_2);
+    I2C_O2O_Master_Init(slaveAddress, sysClkMhz, I2CClkKHz);
+    lcdInit();
+    sramSpiInit();
+
+    Uint16 stringLength = 6;
+    char stringOut[] = "Hello";
+    char stringIn[6] = "     ";
+
+    // fill SRAM with string data ----------------------------------------------------
+    for (Uint32 addr = 0x000000; addr < (Uint32)SRAM_MAX_ADDR; addr += stringLength)
+    {
+        sramVirtualWrite(addr, (Uint16*)&stringOut, stringLength);
+    }
+
+    // read string data back from the SRAM and store into memory ---------------------
+    sramVirtualRead((Uint32)0x000000, (Uint16*)&stringIn, stringLength);
+
+    // output string to the LCD ------------------------------------------------------
+    lcdClear();
+    lcdRow1();
+    lcdString((Uint16 *)&stringIn);
+
+    while(1);
 }
 
 /*
