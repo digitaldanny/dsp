@@ -142,16 +142,6 @@ void pt3_main()
     sramSpiInit();
     interruptInit();
 
-    Uint32 tAddr = 0x001122;
-    Uint16 tData = 0xABCD;
-    while(1)
-    {
-        sramVirtualWrite(tAddr, (Uint16*)&tData, 1);
-        DELAY_US(5000);
-        sramVirtualRead(tAddr, (Uint16*)&tData, 1);
-        DELAY_US(5000);
-    }
-
     while (1)
     {
 
