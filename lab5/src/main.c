@@ -35,6 +35,8 @@
 void pt1_main();
 void pt2_main();
 
+void adcA0Init();
+
 __interrupt void cpuTimer1ISR(void);
 void timer1Init(void);
 void initCPUTimers(void);
@@ -92,9 +94,9 @@ void pt1_main()
     //AdcSetMode(ADC_ADCA, ADC_BITRESOLUTION_16BIT, ADC_SIGNALMODE_DIFFERENTIAL);
 
     EALLOW;
-    initADCs();                 // initialize ADC module A
-    EALLOW;
-    initADCSOCs();              // initialize conversions on ADC module A, pin A0
+    adcA0Init();
+    // initADCs();                 // initialize ADC module A
+    // initADCSOCs();              // initialize conversions on ADC module A, pin A0
     timer1Init();               // initialize timer1 interrupt on Int13 at 10 Hz
 
     // enable global interrupt and realtime interrupt
@@ -102,25 +104,28 @@ void pt1_main()
     ERTM;
 
     // Initialize LCD with output string format
-    char stringA[] = "Voltmeter = X.XXV";
+    char stringA[] = "Voltage = X.XXV";
     lcdRow1();
     lcdString((Uint16 *)&stringA);
 
     while (1)
     {
         // force ADC to convert on A0
-        ADC_forceSOC(ADCA_BASE, ADC_SOC_NUMBER0);
+        // ADC_forceSOC(ADCA_BASE, ADC_SOC_NUMBER0);
+        AdcaRegs.ADCSOCFRC1.all = 0x000F; // set SOC flags for SOC0 to SOC3
 
         if (boolTimer1)
         {
             boolTimer1 = 0; // clear the timer bool
 
             // Wait for ADCA to complete then clear the flag
-            while(ADC_getInterruptStatus(ADCA_BASE, ADC_INT_NUMBER1) == false);
-            ADC_clearInterruptStatus(ADCA_BASE, ADC_INT_NUMBER1);
+            // while(ADC_getInterruptStatus(ADCA_BASE, ADC_INT_NUMBER1) == false);
+            // ADC_clearInterruptStatus(ADCA_BASE, ADC_INT_NUMBER1);
 
             // store the ADC read results before converting to an ASCII character
-            adcAResult = ADC_readResult(ADCARESULT_BASE, ADC_SOC_NUMBER0);
+            // adcAResult = ADC_readResult(ADCARESULT_BASE, ADC_SOC_NUMBER0);
+            while ();
+            adcAResult =
 
             wr[0] = '1'; // ascii character of 'i'
             wr[1] = '.';
@@ -128,11 +133,22 @@ void pt1_main()
             wr[3] = '3';
             wr[4] = '\0';
 
-            lcdCursor(12); // offset t.o the X.XX decimal voltage value
+            lcdCursor(10); // offset t.o the X.XX decimal voltage value
             lcdString((Uint16*)&wr);
             DELAY_US(10000);
         }
     }
+}
+
+void adcA0Init()
+{
+    EALLOW;
+    // AdcSetMode(ADC_ADCA, ADC_BITRESOLUTION_16BIT, ADC_SIGNALMODE_DIFFERENTIAL);
+    ADC_setupSOC(ADCA_BASE, ADC_SOC_NUMBER0, ADC_TRIGGER_EPWM1_SOCA, ADC_CH_ADCIN10, 10U);
+    ADC_setInterruptSource(ADCA_BASE, ADC_INT_NUMBER1, ADC_SOC_NUMBER5);
+    ADC_enableInterrupt(ADCA_BASE, ADC_INT_NUMBER1);
+    ADC_clearInterruptStatus(ADCA_BASE, ADC_INT_NUMBER1);
+    EDIS;
 }
 
 /*
