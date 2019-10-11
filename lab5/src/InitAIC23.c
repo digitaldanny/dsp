@@ -2,29 +2,15 @@
  * initAIC23.c
  */
 
-#include <stdint.h>
-#include <F28x_Project.h>
-#include "AIC23.h"
-
-/***************** Defines ***************/
-//#define SmallDelay() for(volatile long  i = 0; i < 500000; i++) -> MOVED TO AIC23.h
-/***************** Defines ***************/
-#define CodecSPI_CLK_PULS {EALLOW; GpioDataRegs.GPASET.bit.GPIO18 = 1; GpioDataRegs.GPACLEAR.bit.GPIO18 = 1;}
-#define CodecSPI_CS_LOW {EALLOW; GpioDataRegs.GPACLEAR.bit.GPIO19 = 1;}
-#define CodecSPI_CS_HIGH {EALLOW; GpioDataRegs.GPASET.bit.GPIO19 = 1;}
+#include "InitAIC23.h"
 
 /***************** User Functions *****************/
-void InitMcBSPb();
-void InitSPIA();
-void InitAIC23();
-void SpiTransmit(uint16_t data);
-
-void InitBigBangedCodecSPI();
-void BitBangedCodecSpiTransmit(Uint16 data);
-
-
-
-/***************** User Functions *****************/
+void SmallDelay()
+{
+    DELAY_US(10000);
+    DELAY_US(10000);
+    DELAY_US(10000);
+}
 
 void InitAIC23()
 {
@@ -133,12 +119,15 @@ void InitMcBSPb()
     McbspbRegs.MFFINT.all=0x0; // Disable all interrupts
     McbspbRegs.SPCR1.bit.RINTM = 0; // McBSP interrupt flag - RRDY
     McbspbRegs.SPCR2.bit.XINTM = 0; // McBSP interrupt flag - XRDY
+
     // Clear Receive Control Registers
     McbspbRegs.RCR2.all = 0x0;
     McbspbRegs.RCR1.all = 0x0;
+
     // Clear Transmit Control Registers
     McbspbRegs.XCR2.all = 0x0;
     McbspbRegs.XCR1.all = 0x0;
+
     // Set Receive/Transmit to 32-bit operation
     McbspbRegs.RCR2.bit.RWDLEN2 = 5;
     McbspbRegs.RCR1.bit.RWDLEN1 = 5;
@@ -150,23 +139,31 @@ void InitMcBSPb()
     McbspbRegs.XCR2.bit.XPHASE = 1; // Dual-phase frame for transmit
     McbspbRegs.XCR1.bit.XFRLEN1 = 0; // Transmit frame length = 1 word in phase 1
     McbspbRegs.XCR2.bit.XFRLEN2 = 0; // Transmit frame length = 1 word in phase 2
+
     // I2S mode: R/XDATDLY = 1 always
     McbspbRegs.RCR2.bit.RDATDLY = 1;
     McbspbRegs.XCR2.bit.XDATDLY = 1;
+
     // Frame Width = 1 CLKG period, CLKGDV must be 1 as slave
     McbspbRegs.SRGR1.all = 0x0001;
     McbspbRegs.PCR.all=0x0000;
+
     // Transmit frame synchronization is supplied by an external source via the FSX pin
     McbspbRegs.PCR.bit.FSXM = 0;
+
     // Receive frame synchronization is supplied by an external source via the FSR pin
     McbspbRegs.PCR.bit.FSRM = 0;
+
     // Select sample rate generator to be signal on MCLKR pin
     McbspbRegs.PCR.bit.SCLKME = 1;
     McbspbRegs.SRGR2.bit.CLKSM = 0;
+
     // Receive frame-synchronization pulses are active low - (L-channel first)
     McbspbRegs.PCR.bit.FSRP = 1;
+
     // Transmit frame-synchronization pulses are active low - (L-channel first)
     McbspbRegs.PCR.bit.FSXP = 1;
+
     // Receive data is sampled on the rising edge of MCLKR
     McbspbRegs.PCR.bit.CLKRP = 1;
 
