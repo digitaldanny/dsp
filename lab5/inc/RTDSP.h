@@ -14,5 +14,7 @@
 #include "RTDSP_Timer.h"
 #include "RTDSP_ADC.h"
 #include "OneToOneI2CDriver.h"
+#include "InitAIC23.h"
+#include "AIC23.h"
 
 #endif

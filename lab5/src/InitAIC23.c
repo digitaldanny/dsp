@@ -10,6 +10,9 @@ void SmallDelay()
     DELAY_US(10000);
     DELAY_US(10000);
     DELAY_US(10000);
+    DELAY_US(10000);
+    DELAY_US(10000);
+    DELAY_US(10000);
 }
 
 void InitAIC23()
@@ -167,25 +170,27 @@ void InitMcBSPb()
     // Receive data is sampled on the rising edge of MCLKR
     McbspbRegs.PCR.bit.CLKRP = 1;
 
-
-
     // Transmit data is sampled on the rising edge of CLKX
     McbspbRegs.PCR.bit.CLKXP = 1;
 
-
-
     // The transmitter gets its clock signal from MCLKX
     McbspbRegs.PCR.bit.CLKXM = 0;
+
     // The receiver gets its clock signal from MCLKR
     McbspbRegs.PCR.bit.CLKRM = 0;
+
     // Enable Receive Interrupt
     McbspbRegs.MFFINT.bit.RINT = 1;
+
     // Ignore unexpected frame sync
     //McbspbRegs.XCR2.bit.XFIG = 1;
     McbspbRegs.SPCR2.all |=0x00C0; // Frame sync & sample rate generators pulled out of reset
-    delay_loop();
+
+    SmallDelay(); // delay_loop();
     McbspbRegs.SPCR2.bit.XRST=1; // Enable Transmitter
     McbspbRegs.SPCR1.bit.RRST=1; // Enable Receiver
+
+    // initialize Mcbsp interrupt
     EDIS;
 }
 
