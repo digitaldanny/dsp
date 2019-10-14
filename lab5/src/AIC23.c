@@ -39,11 +39,13 @@ Uint16 rinput_volctl (Uint16 volume) { // Right Line Input Volume Control
 }
 
 Uint16 lhp_volctl (Uint16 volume) {    // Left Headphone Volume Control
-    return (LRS|LHVCTL|LZC|volume);
+    // return (LRS|LHVCTL|LZC|volume); // updates L and R headphones simultaneously
+    return (LHVCTL|LZC|volume);
 }
 
 Uint16 rhp_volctl (Uint16 volume) {    // Right Headphone Volume Control
-    return (RLS|RHVCTL|RZC|volume);
+    // return (RLS|RHVCTL|RZC|volume); // updates L and R headphones simultaneously
+    return (RHVCTL|RZC|volume);
 }
 
 Uint16 nomicaaudpath (void) {          // Analog audio path control

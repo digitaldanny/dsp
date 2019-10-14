@@ -166,7 +166,7 @@ void pt1_main()
                 adcAResult = AdcaResultRegs.ADCRESULT0; // save results of the conversion
                 adcFloat = (VREF * (float)adcAResult) / 4096; // digital to voltage conversion reason.
 
-                adcAResultVector[i] = adcFloat;
+                adcAResultVector[i] = adcFloat/1.0325f;
             }
 
             // average all the samples taken
