@@ -24,7 +24,7 @@
  * Interrupt_register(INT_TIMER1, &cpuTimer1ISR);
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-void timer1Init(void);
+void timer1Init(float period);
 
 //
 // initCPUTimers - This function initializes all three CPU timers

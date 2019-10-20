@@ -26,9 +26,10 @@
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  */
 #define PT1
+
 #define SAMPLING_FREQUENCY_A        46875.0f
-#define SAMPLING_FREQUENCY          SAMPLING_FREQUENCY_A
-#define TIMER_PERIOD                (float)1/SAMPLING_FREQUENCY
+#define SAMPLING_FREQUENCY          (2.0f*SAMPLING_FREQUENCY_A)
+#define TIMER_PERIOD                (float)(1000000.0f/SAMPLING_FREQUENCY) // in uSeconds
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -41,6 +42,10 @@
 #define LEFT_BUTTON                 0x4
 #define MIDDLE_BUTTON               0x2
 #define RIGHT_BUTTON                0x1
+
+#define SW0                         0x1
+#define SW1                         0x2
+#define SW2                         0x4
 
 #define LED0                        0x01
 #define LED1                        0x02
@@ -70,12 +75,14 @@ typedef enum i2sSide
  */
 void pt1_main();
 void pt2_main();
+void pt3_main();
+void pt4_main();
 
 void adcA0Init();
 
-void timer1Init(void);
 void initCPUTimers(void);
 void configCPUTimer(uint32_t, float, float);
+void gpioTimerCheckInit();
 
 __interrupt void cpuTimer1ISR(void);
 __interrupt void Mcbsp_RxINTB_ISR(void);
@@ -89,8 +96,8 @@ __interrupt void Mcbsp_RxINTB_ISR(void);
 volatile Uint16 boolTimer1;  // allows main to determine if the timer has run or not
 
 volatile i2sSide_t ch_sel;
-volatile Uint32 DataInLeft;
-volatile Uint32 DataInRight;
+volatile Uint16 DataInLeft;
+volatile Uint16 DataInRight;
 volatile Uint16 LR_received;
 
 /*
@@ -103,9 +110,6 @@ volatile Uint16 LR_received;
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  * User can select between parts of the lab to compile and
  * run using the #define located under CONFIGURATIONS.
- *
- * #define PT1 = pt1_main (voltmeter)
- * #define Pt2 = pt2_main (codec sound in/out)
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
 void main(void)
@@ -116,6 +120,14 @@ void main(void)
 
 #ifdef PT2
     pt2_main();
+#endif
+
+#ifdef PT3
+    pt3_main();
+#endif
+
+#ifdef PT4
+    pt4_main();
 #endif
 }
 
@@ -141,14 +153,15 @@ void pt1_main()
 
     sramSpiInit();              // SPI module for SRAM reads and writes
     lcdInit();                  // initialize GPIO for I2C communication to LCD
+    gpioTimerCheckInit();       // GPIO 123 used to probe timer interrupt
     timer1Init(TIMER_PERIOD);   // initialize timer1 interrupt on Int13 at 10 Hz
     initCodecLeds();            // turned off by default
     initCodecButtons();         // set as inputs
     initCodecSwitches();        // set as inputs
 
-    InitMcBSPb();               // initialize I2S for sound input/output
     InitSPIA();
     InitBigBangedCodecSPI();
+    InitMcBSPb();               // initialize I2S for sound input/output
     Interrupt_enable(INT_MCBSPB_RX); //INT_MCBSPB_RX);
     Interrupt_register(INT_MCBSPB_RX, &Mcbsp_RxINTB_ISR); // set I2S RX interrupt to ISR address
 
@@ -166,36 +179,40 @@ void pt1_main()
 
     clearCodecLeds();
 
+    // amplify the input lines to the max volume
+    Uint16 command = lhp_volctl(0x7F);
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
+    command = rhp_volctl(0x7F);
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
     while(1)
     {
         Uint16 buttons = getCodecButtons();
-        Uint16 dataOut[4]; // lower + upper word of the two 32-bit samples
-        Uint16 dataIn[4];
+        int16 dataOut[2]; // lower + upper word of the two 32-bit samples
+        int16 dataIn[2];
 
         // +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
-        // LEFT - fill up the buffer
+        // LEFT - fill up the buffer with top 16 bits of the sample
         // +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
         if (buttons & LEFT_BUTTON)
         {
             clearCodecLeds();
 
-            for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i += 4)
+            for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i += 2)
             {
                 // wait for a new sample to be received from the codec
                 // and wait for the sampling frequency interrupt
                 while (LR_received == 0);
-
-                // write out 2 32-bit samples (left and right)
-                dataOut[0] = (DataInLeft >> 0 ) & 0xFFFF;
-                dataOut[1] = (DataInLeft >> 16) & 0xFFFF;
-                dataOut[2] = (DataInRight >> 0 ) & 0xFFFF;
-                dataOut[3] = (DataInRight >> 16) & 0xFFFF;
-
-                sramVirtualWrite(SRAM_MIN_ADDR + i, (Uint16 *)&dataOut, 4);
                 LR_received = 0;
-                boolTimer1 = 0;
 
-                Interrupt_enable(INT_MCBSPB_RX);
+                dataOut[0] = DataInLeft & 0xFFFF;
+                dataOut[1] = DataInRight & 0xFFFF;
+
+                sramCircularWrite(SRAM_MIN_ADDR + i, (Uint16 *)&dataOut, 2);
+                // Interrupt_enable(INT_MCBSPB_RX);
             }
 
             setCodecLeds(LED0);
@@ -209,46 +226,42 @@ void pt1_main()
         {
             clearCodecLeds();
 
-            for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i += 4)
+            for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i += 2)
             {
-                // wait for a new sample to be received from the codec
-                while (LR_received == 0);
-
                 // READ -------------------------------------------------------
 
                 // read in the currently stored samples
-                sramVirtualRead(SRAM_MIN_ADDR + i, (Uint16 *)&dataIn, 4);
+                sramCircularRead(SRAM_MIN_ADDR + i, (Uint16 *)&dataIn, 2);
+
+                // wait for a new sample to be received from the codec
+                while (LR_received == 0);
+                LR_received = 0;
+
+                // convert new samples from Uint16 to Uint32
+                float newLeftSample = (int16)DataInLeft;
+                float newRightSample = (int16)DataInRight;
 
                 // MODIFY -----------------------------------------------------
 
-                // convert old samples from 2 Uint16's into Uint64's
-                Uint64 prevLeftSample = ((Uint64)dataIn[1] << 16) | dataIn[0];
-                Uint64 prevRightSample = ((Uint64)dataIn[3] << 16) | dataIn[2];
+                // convert old samples from Uint16's into Uint32's
+                float prevLeftSample = dataIn[0];
+                float prevRightSample = dataIn[1];
 
-                // convert new samples from Uint32 to Uint64
-                Uint64 newLeftSample = (Uint64)DataInLeft;
-                Uint64 newRightSample = (Uint64)DataInRight;
-
-                // add the old and new Uint64 samples together.
+                // add the old and new Uint32 samples together.
                 // divide the sum by 2 to average.
                 // typecast back to Uint16's to write out
                 newLeftSample += prevLeftSample; // sum
                 newRightSample += prevRightSample; // sum
 
-                newLeftSample >>= 1; // average
-                newRightSample >>= 1; // average
+                newLeftSample /= 2.0f; // average
+                newRightSample /= 2.0f; // average
 
-                dataOut[0] = (newLeftSample >> 0 ) & 0xFFFF;  // package for output
-                dataOut[1] = (newLeftSample >> 16) & 0xFFFF;  // package for output
-                dataOut[2] = (newRightSample >> 0 ) & 0xFFFF; // package for output
-                dataOut[3] = (newRightSample >> 16) & 0xFFFF; // package for output
+                dataOut[0] = (int16)newLeftSample;  // package for output
+                dataOut[1] = (int16)newRightSample; // package for output
 
                 // WRITE -----------------------------------------------------
 
-                sramVirtualWrite(SRAM_MIN_ADDR + i, (Uint16 *)&dataOut, 4);
-                LR_received = 0;
-                boolTimer1 = 0;
-                Interrupt_enable(INT_MCBSPB_RX);
+                sramCircularWrite(SRAM_MIN_ADDR + i, (Uint16 *)&dataOut, 2);
             }
 
             setCodecLeds(LED1);
@@ -262,35 +275,72 @@ void pt1_main()
         {
             clearCodecLeds();
 
-            for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i += 4)
+            for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i += 2)
             {
                 // read in the currently stored samples to write to codec
-                sramVirtualRead(SRAM_MIN_ADDR + i, (Uint16 *)&dataIn, 4);
-
-                Uint32 newLeftDataOut = ((Uint32)dataIn[1] << 16) | dataIn[0];
-                Uint32 newRightDataOut = ((Uint32)dataIn[3] << 16) | dataIn[2];
+                sramCircularRead(SRAM_MIN_ADDR + i, (Uint16 *)&dataIn, 2);
 
                 // wait for the timer to go off
                 while (boolTimer1 == 0);
                 boolTimer1 = 0;
 
                 // send out data to just left channel
-                McbspbRegs.DXR2.all = newLeftDataOut >> 16;
+                McbspbRegs.DXR2.all = dataIn[0];
 
                 // Transfer won't happen until DXR1 is written to
-                McbspbRegs.DXR1.all = newLeftDataOut;
+                McbspbRegs.DXR1.all = 0x0000; // newLeftDataOut;
 
                 // send out data to just right channel
-                McbspbRegs.DXR2.all = newRightDataOut >> 16;
+                McbspbRegs.DXR2.all = dataIn[1];
 
                 // Transfer won't happen until DXR1 is written to
-                McbspbRegs.DXR1.all = newRightDataOut;
+                McbspbRegs.DXR1.all = 0x0000; // newRightDataOut;
             }
 
             setCodecLeds(LED2);
             DELAY_US(100000);
         }
     }
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * This function tests the attenuation for various sampling
+ * frequencies.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void pt2_main()
+{
+
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: This function is used to initialize a gpio
+ * to be an output. This is used to probe the board and
+ * check that the interrupt is triggering at the time
+ * expected.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void gpioTimerCheckInit()
+{
+    EALLOW;
+
+    // timer probe
+    GpioDataRegs.GPDDAT.bit.GPIO122 = 1;
+    GpioDataRegs.GPDDAT.bit.GPIO122 = 1;
+    GpioCtrlRegs.GPDDIR.bit.GPIO122 = GPIO_DIR_MODE_OUT;
+    GpioCtrlRegs.GPDGMUX2.bit.GPIO122 = 0x0000;
+    GpioCtrlRegs.GPDMUX2.bit.GPIO122 = 0x0000;
+    GpioCtrlRegs.GPDPUD.bit.GPIO122 = 0x0000;
+
+    // mcbsp probe
+    GpioDataRegs.GPDDAT.bit.GPIO123 = 1;
+    GpioDataRegs.GPDDAT.bit.GPIO123 = 1;
+    GpioCtrlRegs.GPDDIR.bit.GPIO123 = GPIO_DIR_MODE_OUT;
+    GpioCtrlRegs.GPDGMUX2.bit.GPIO123 = 0x0000;
+    GpioCtrlRegs.GPDMUX2.bit.GPIO123 = 0x0000;
+    GpioCtrlRegs.GPDPUD.bit.GPIO123 = 0x0000;
 }
 
 /*
@@ -302,8 +352,15 @@ void pt1_main()
 __interrupt void cpuTimer1ISR(void)
 {
     boolTimer1 = 1;
+
+    // Probe to check interrupt timing..
+    GpioDataRegs.GPDDAT.bit.GPIO122 = 1;
+    GpioDataRegs.GPDDAT.bit.GPIO122 = 0;
 }
 
+/*
+ * Codec Audio input interrupt - DSP mode requires 1 interrupt
+ */
 __interrupt void Mcbsp_RxINTB_ISR(void)
 {
     if (ch_sel == LEFT)
@@ -312,10 +369,8 @@ __interrupt void Mcbsp_RxINTB_ISR(void)
 
         // read in left channel
         DataInLeft = McbspbRegs.DRR2.all;
-        DataInLeft <<= 16;
-        DataInLeft |= McbspbRegs.DRR1.all;
+        McbspbRegs.DRR1.all;
     }
-
 
     else
     {
@@ -323,12 +378,24 @@ __interrupt void Mcbsp_RxINTB_ISR(void)
 
         // read in right channel
         DataInRight = McbspbRegs.DRR2.all;
-        DataInRight <<= 16;
-        DataInRight |= McbspbRegs.DRR1.all;
+        McbspbRegs.DRR1.all;
 
         LR_received = 1;
-        Interrupt_disable(INT_MCBSPB_RX);
     }
+
+    // // Left data in DSP mode
+    // DataInLeft = McbspbRegs.DRR2.all;
+    // McbspbRegs.DRR1.all;
+    //
+    // // Right data in DSP mode
+    // DataInRight = McbspbRegs.DRR2.all;
+    // McbspbRegs.DRR1.all;
+
+    // LR_received = 1;
+
+    // Probe to check interrupt timing
+    GpioDataRegs.GPDDAT.bit.GPIO123 = 1;
+    GpioDataRegs.GPDDAT.bit.GPIO123 = 0;
 
     // acknowledge interrupt
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP6;

@@ -19,7 +19,7 @@
  * Interrupt_register(INT_TIMER1, &cpuTimer1ISR);
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-void timer1Init(void)
+void timer1Init(float period)
 {
     // points the timer interrupt to the ISR.
     // Interrupt_register(INT_TIMER1, &cpuTimer1ISR);
@@ -28,7 +28,7 @@ void timer1Init(void)
     initCPUTimers();
 
     // configure CPU timer to interrupt at 10 Hz (0.1 s)
-    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, 46875);
+    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
 
     // enable interrupt for the timer
     CPUTimer_enableInterrupt(CPUTIMER1_BASE);

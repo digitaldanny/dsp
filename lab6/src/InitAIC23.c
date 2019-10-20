@@ -19,42 +19,53 @@ void InitAIC23()
 {
     SmallDelay();
     uint16_t command;
+
     command = reset();
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
+
     command = softpowerdown();       // Power down everything except device and clocks
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
+
     command = linput_volctl(LIV);    // Unmute left line input and maintain default volume
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
+
     command = rinput_volctl(RIV);    // Unmute right line input and maintain default volume
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
+
     command = lhp_volctl(LHV);       // Left headphone volume control
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
+
     command = rhp_volctl(RHV);       // Right headphone volume control
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
+
     command = nomicaaudpath();      // Turn on DAC, mute mic
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
+
     command = digaudiopath();       // Disable DAC mute, add de-emph
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
 
     // I2S
     command = I2Sdigaudinterface(); // AIC23 master mode, I2S mode,32-bit data, LRP=1 to match with XDATADLY=1
+    //command = DSPdigaudinterface();
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
     command = CLKsampleratecontrol (SR48);
+    //command = USBsampleratecontrol (SR48);
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
 
     command = digact();             // Activate digital interface
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
+
     command = nomicpowerup();      // Turn everything on except Mic.
     BitBangedCodecSpiTransmit (command);
 
@@ -147,6 +158,10 @@ void InitMcBSPb()
     McbspbRegs.RCR2.bit.RDATDLY = 1;
     McbspbRegs.XCR2.bit.XDATDLY = 1;
 
+    // DSP mode: R/XDATDLY = LRP - data is ready on the 2nd BCLK rising edge
+    // McbspbRegs.RCR2.bit.RDATDLY = 1;
+    // McbspbRegs.XCR2.bit.XDATDLY = 1;
+
     // Frame Width = 1 CLKG period, CLKGDV must be 1 as slave
     McbspbRegs.SRGR1.all = 0x0001;
     McbspbRegs.PCR.all=0x0000;
@@ -161,11 +176,16 @@ void InitMcBSPb()
     McbspbRegs.PCR.bit.SCLKME = 1;
     McbspbRegs.SRGR2.bit.CLKSM = 0;
 
+    // I2S mode
     // Receive frame-synchronization pulses are active low - (L-channel first)
     McbspbRegs.PCR.bit.FSRP = 1;
 
     // Transmit frame-synchronization pulses are active low - (L-channel first)
     McbspbRegs.PCR.bit.FSXP = 1;
+
+    // DSP mode:
+    // McbspaRegs.PCR.bit.FSRP = 0;  // 0-FSRP is active high (data rx'd from rising edge)
+    // McbspaRegs.PCR.bit.FSXP = 0 ; // 0-FSXP is active high (data tx'd from rising edge)
 
     // Receive data is sampled on the rising edge of MCLKR
     McbspbRegs.PCR.bit.CLKRP = 1;
@@ -222,8 +242,6 @@ void InitBigBangedCodecSPI(){
 
     GpioDataRegs.GPASET.bit.GPIO19 = 1;
     GpioDataRegs.GPACLEAR.bit.GPIO18 = 1;
-
-
 
     EDIS;
 }
