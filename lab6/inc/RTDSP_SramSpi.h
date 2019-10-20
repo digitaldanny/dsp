@@ -19,6 +19,7 @@
 #define SRAM_MIN_ADDR   SRAM0_MIN_ADDR
 #define SRAM_MAX_ADDR   SRAM1_MAX_ADDR
 #define SRAM_LENGTH     SRAM1_MAX_ADDR + 1
+#define BUF_MASK        SRAM1_MAX_ADDR
 
 void sramSpiInit(void);
 
@@ -95,5 +96,25 @@ Uint16 sramVirtualWrite(Uint32 addr, Uint16 * data, Uint32 len);
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
 Uint16 sramVirtualRead(Uint32 addr, Uint16 * data, Uint32 len);
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: sramCircularWrite
+ * This function will automatically write to the beginning
+ * of the SRAM as a circular buffer if the input address
+ * is past the SRAM's address range.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+Uint16 sramCircularWrite(Uint32 addr, Uint16 * data, Uint32 len);
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: sramCircularRead
+ * This function will automatically read from the beginning
+ * of the SRAM as a circular buffer if the input address
+ * is past the SRAM's address range.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+Uint16 sramCircularRead(Uint32 addr, Uint16 * data, Uint32 len);
 
 #endif /* SRC_RTDSP_SRAMSPI_H_ */

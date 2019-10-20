@@ -371,3 +371,29 @@ Uint16 sramVirtualRead(Uint32 addr, Uint16 * data, Uint32 len)
 
     return err;
 }
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: sramCircularWrite
+ * This function will automatically write to the beginning
+ * of the SRAM as a circular buffer if the input address
+ * is past the SRAM's address range.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+Uint16 sramCircularWrite(Uint32 addr, Uint16 * data, Uint32 len)
+{
+    return sramVirtualWrite(addr & BUF_MASK, data, len);
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: sramCircularRead
+ * This function will automatically read from the beginning
+ * of the SRAM as a circular buffer if the input address
+ * is past the SRAM's address range.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+Uint16 sramCircularRead(Uint32 addr, Uint16 * data, Uint32 len)
+{
+    return sramVirtualRead(addr & BUF_MASK, data, len);
+}
