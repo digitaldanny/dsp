@@ -100,6 +100,9 @@ void pt3_io(void);
 void pt3_interpolation(void);
 void pt3_decimation(void);
 
+void reverb(Uint16 p, float a, Uint32 index);
+void echo(Uint16 p, float a, Uint32 index);
+
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  *                        GLOBALS
@@ -686,12 +689,178 @@ void main()
     }
 }
 #endif
+#ifdef PT4
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * This function implements interpolation and decimation.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void main()
+{
+    // global variable initialization
+    ch_sel      = LEFT;
+    DataInLeft  = 0;
+    DataInRight = 0;
+    LR_received = 0;
+
+    DINT;  // Enable Global interrupt INTM
+    DRTM;  // Enable Global realtime interrupt DBGM
+
+    InitSysCtrl();              // disable watchdog
+    Interrupt_initModule();     // initialize PIE and clear PIE registers.
+    Interrupt_initVectorTable(); // initializes the PIE vector table with pointers to the shell ISRs.
+    Interrupt_register(INT_TIMER1, &cpuTimer1ISR); // set the timer interrupt to point at the cpuTimerISR
+    Interrupt_disable(INT_TIMER1);
+    EALLOW;
+
+    sramSpiInit();              // SPI module for SRAM reads and writes
+    lcdInit();                  // initialize GPIO for I2C communication to LCD
+    gpioTimerCheckInit();       // GPIO 123 used to probe timer interrupt
+    timer1Init(TIMER_PERIOD);   // initialize timer1 interrupt on Int13 at 10 Hz
+    initCodecLeds();            // turned off by default
+    initCodecButtons();         // set as inputs
+    initCodecSwitches();        // set as inputs
+
+    InitSPIA();
+    InitBigBangedCodecSPI();
+    Interrupt_enable(INT_MCBSPB_RX); //INT_MCBSPB_RX);
+    Interrupt_register(INT_MCBSPB_RX, &Mcbsp_RxINTB_ISR); // set I2S RX interrupt to ISR address
+    InitMcBSPb();               // initialize I2S for sound input/output
+
+    InitAIC23();                // initialize Codec's command registers
+
+    // Enable global Interrupts and higher priority real-time debug events:
+    EINT;  // Enable Global interrupt INTM
+    ERTM;  // Enable Global realtime interrupt DBGM
+
+    clearCodecLeds();
+
+    // amplify the input lines to the max volume
+    Uint16 command = lhp_volctl(0x7F);
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
+    command = rhp_volctl(0x7F);
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
+    command = aaudpath(); // enable the microphone
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
+    command = fullpowerup(); // turn on the mic for testing
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
+    lcdDisableCursorBlinking();
+
+    // 48 KHz
+    command = CLKsampleratecontrol (SR48);
+
+    // 48 KHz output
+    float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_48));
+    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
+
+    // update frequencies on LCD
+    char string[] = "Part 4";
+    lcdRow1();
+    lcdString((Uint16 *)&string);
+
+    Uint16 p = 50000;
+    float a = 0.4f;
+    Uint32 index = 0;
+
+    Uint16 buttons = 0;
+    Uint32 switches = 0;
+    Uint32 prevSwitches = 0xDEAD; // dummy value to force frequency change initially
+    void (*effect)(Uint16, float, Uint32) = &reverb;
+
+    // initialize the buffer by filling with values..
+    for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i++)
+    {
+        while (LR_received == 0);
+        LR_received = 0;
+        Uint16 dataOut = (int16)DataInMono; // float -> int16
+        sramCircularWrite(SRAM_MIN_ADDR + i, (Uint16 *)&dataOut, 1);
+    }
+
+    while(1)
+    {
+        switches = getCodecSwitches();
+        buttons = getCodecButtons();
+
+        if (buttons == RIGHT_BUTTON)
+        {
+            lcdClear();
+            char s[] = "Reverb";
+            lcdRow1();
+            lcdString((Uint16 *)&s);
+            effect = &reverb;
+        }
+        else if (buttons & LEFT_BUTTON)
+        {
+            lcdClear();
+            char s[] = "Echo";
+            lcdRow1();
+            lcdString((Uint16 *)&s);
+            effect = &echo;
+        }
+
+        // call the effect and increment the buffer address
+        (*effect)(p, a, index);
+        index++;
+    }
+}
+#endif
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+
  * FUNCTIONS
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+
  */
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: reverb
+ * Implements the following function..
+ * y[n] = (1-a)x[n] + ax[n-p]
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void reverb(Uint16 p, float a, Uint32 index)
+{
+    // Get the new sample to output to the codec ----------------
+    while (LR_received == 0);
+    LR_received = 0;
+
+    // save the new sample in SRAM to be used by the reverb later
+    int16 dataOut = DataInMono;     // x[n]
+    sramCircularWrite(SRAM_MIN_ADDR + index, (Uint16 *)&dataOut, 1);
+
+    // (1-a)x[n]
+    dataOut = (int16)((1.0f - a)*(float)((int16)DataInMono));
+    McbspbRegs.DXR2.all = dataOut;   // tx
+    McbspbRegs.DXR1.all = dataOut;   // tx
+
+    // Get x[n-p] to be output as reverb -----------
+    sramCircularRead(SRAM_MIN_ADDR + index - p, (Uint16 *)&dataOut, 1);
+
+    dataOut = (int16)(a*((float)dataOut));
+    McbspbRegs.DXR2.all = dataOut;   // tx
+    McbspbRegs.DXR1.all = dataOut;   // tx
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: echo
+ * Implements the following function..
+ * y[n] = (1-a)x[n] + ay[n-p]
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void echo(Uint16 p, float a, Uint32 index)
+{
+    McbspbRegs.DXR2.all = DataInMono;   // tx
+    McbspbRegs.DXR1.all = DataInMono;   // tx
+}
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
