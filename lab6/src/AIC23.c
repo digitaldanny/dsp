@@ -63,8 +63,11 @@ Uint16 digaudiopath (void) {           // Digital audio path control
 }
 
 Uint16 DSPdigaudinterface (void) {     // Digital audio interface format
-    return (DAUDINTF|(AIC23MS|         // AIC23 master mode, DSP mode,32-bit data,
-            FORDSP|IWL32B|LRP));         // LRP=1
+    // return (DAUDINTF|(AIC23MS|         // AIC23 master mode, DSP mode,32-bit data,
+    //         FORDSP|IWL32B|LRP));         // LRP=1
+
+    return (DAUDINTF|(AIC23MS|         // AIC23 master mode, DSP mode,16-bit data,
+            FORDSP|IWL16B|LRPZRO));         // LRP=1
 }
 
 Uint16 I2Sdigaudinterface (void) {     // Digital audio interface format

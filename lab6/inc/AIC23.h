@@ -113,7 +113,10 @@
 #define SRUSB44_1    0x0022 // 44.1 kHz USB, BOSR set
 #define SR48         0x0000 // 48 kHz USB/normal, BOSR clear
 #define SR44_1       0x0020 // 44.1 kHz normal - 11.2896 MHz MCLK, BOSR clear
-#define SR32         0x0018 // 32 kHz normal, BOSR clear
+// #define SR32         0x0018 // 32 kHz normal, BOSR clear
+// #define SR8          0x000C // 8 KHz normal, BOSR clear
+#define SR32         0x001A // 32 kHz normal, BOSR set
+#define SR8          0x000E // 8 KHz normal, BOSR set
 
 
 // Volume Control:

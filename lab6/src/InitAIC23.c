@@ -53,12 +53,11 @@ void InitAIC23()
     SmallDelay();
 
     // I2S
-    command = I2Sdigaudinterface(); // AIC23 master mode, I2S mode,32-bit data, LRP=1 to match with XDATADLY=1
-    //command = DSPdigaudinterface();
+    //command = I2Sdigaudinterface(); // AIC23 master mode, I2S mode,32-bit data, LRP=1 to match with XDATADLY=1
+    command = DSPdigaudinterface();
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
     command = CLKsampleratecontrol (SR48);
-    //command = USBsampleratecontrol (SR48);
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
 
@@ -131,7 +130,10 @@ void InitMcBSPb()
     McbspbRegs.SPCR1.all = 0; // Reset Receiver, Right justify word
     McbspbRegs.SPCR1.bit.RJUST = 2; // left-justify word in DRR and zero-fill LSBs
     McbspbRegs.MFFINT.all=0x0; // Disable all interrupts
-    McbspbRegs.SPCR1.bit.RINTM = 0; // McBSP interrupt flag - RRDY
+
+    // McbspbRegs.SPCR1.bit.RINTM = 0; // McBSP interrupt flag - RRDY
+    McbspbRegs.SPCR1.bit.RINTM = 2;
+
     McbspbRegs.SPCR2.bit.XINTM = 0; // McBSP interrupt flag - XRDY
 
     // Clear Receive Control Registers
@@ -143,24 +145,34 @@ void InitMcBSPb()
     McbspbRegs.XCR1.all = 0x0;
 
     // Set Receive/Transmit to 32-bit operation
+    // I2S operation
     McbspbRegs.RCR2.bit.RWDLEN2 = 5;
     McbspbRegs.RCR1.bit.RWDLEN1 = 5;
     McbspbRegs.XCR2.bit.XWDLEN2 = 5;
     McbspbRegs.XCR1.bit.XWDLEN1 = 5;
-    McbspbRegs.RCR2.bit.RPHASE = 1; // Dual-phase frame for receive
-    McbspbRegs.RCR1.bit.RFRLEN1 = 0; // Receive frame length = 1 word in phase 1
-    McbspbRegs.RCR2.bit.RFRLEN2 = 0; // Receive frame length = 1 word in phase 2
-    McbspbRegs.XCR2.bit.XPHASE = 1; // Dual-phase frame for transmit
+
+    // I2S MODE
+    // McbspbRegs.RCR2.bit.RPHASE = 1; // Dual-phase frame for receive
+    // McbspbRegs.RCR1.bit.RFRLEN1 = 0; // Receive frame length = 1 word in phase 1
+    // McbspbRegs.RCR2.bit.RFRLEN2 = 0; // Receive frame length = 1 word in phase 2
+    // McbspbRegs.XCR2.bit.XPHASE = 1; // Dual-phase frame for transmit
+
+    // DSP MODE
+    McbspbRegs.RCR2.bit.RPHASE = 0;
+    McbspbRegs.RCR1.bit.RFRLEN1 = 0;
+    McbspbRegs.RCR2.bit.RFRLEN2 = 0;
+    McbspbRegs.XCR2.bit.XPHASE = 0;
+
     McbspbRegs.XCR1.bit.XFRLEN1 = 0; // Transmit frame length = 1 word in phase 1
     McbspbRegs.XCR2.bit.XFRLEN2 = 0; // Transmit frame length = 1 word in phase 2
 
     // I2S mode: R/XDATDLY = 1 always
-    McbspbRegs.RCR2.bit.RDATDLY = 1;
-    McbspbRegs.XCR2.bit.XDATDLY = 1;
-
-    // DSP mode: R/XDATDLY = LRP - data is ready on the 2nd BCLK rising edge
     // McbspbRegs.RCR2.bit.RDATDLY = 1;
     // McbspbRegs.XCR2.bit.XDATDLY = 1;
+
+    // DSP mode: R/XDATDLY = LRP - data is ready on the 2nd BCLK rising edge
+    McbspbRegs.RCR2.bit.RDATDLY = 0;
+    McbspbRegs.XCR2.bit.XDATDLY = 0;
 
     // Frame Width = 1 CLKG period, CLKGDV must be 1 as slave
     McbspbRegs.SRGR1.all = 0x0001;
@@ -176,16 +188,16 @@ void InitMcBSPb()
     McbspbRegs.PCR.bit.SCLKME = 1;
     McbspbRegs.SRGR2.bit.CLKSM = 0;
 
-    // I2S mode
-    // Receive frame-synchronization pulses are active low - (L-channel first)
-    McbspbRegs.PCR.bit.FSRP = 1;
-
-    // Transmit frame-synchronization pulses are active low - (L-channel first)
-    McbspbRegs.PCR.bit.FSXP = 1;
+    // // I2S mode
+    // // Receive frame-synchronization pulses are active low - (L-channel first)
+    // McbspbRegs.PCR.bit.FSRP = 1;
+    //
+    // // Transmit frame-synchronization pulses are active low - (L-channel first)
+    // McbspbRegs.PCR.bit.FSXP = 1;
 
     // DSP mode:
-    // McbspaRegs.PCR.bit.FSRP = 0;  // 0-FSRP is active high (data rx'd from rising edge)
-    // McbspaRegs.PCR.bit.FSXP = 0 ; // 0-FSXP is active high (data tx'd from rising edge)
+    McbspaRegs.PCR.bit.FSRP = 0;  // 0-FSRP is active high (data rx'd from rising edge)
+    McbspaRegs.PCR.bit.FSXP = 0 ; // 0-FSXP is active high (data tx'd from rising edge)
 
     // Receive data is sampled on the rising edge of MCLKR
     McbspbRegs.PCR.bit.CLKRP = 1;
