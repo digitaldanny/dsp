@@ -25,8 +25,8 @@
  *                      CONFIGURATIONS
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  */
-#define PT1
-#define I2S
+#define PT4
+#define DECIMATION_SIZE             2
 
 #define SAMPLING_FREQUENCY_A        46875.0f
 #define SAMPLING_FREQUENCY_48       46875.0f
@@ -59,6 +59,15 @@
 #define LED5                        0x20
 #define LED6                        0x40
 #define LED7                        0x80
+
+#define lcdClearBottomRow()         char clearString[] = "                "; \
+                                    lcdRow2(); \
+                                    lcdString((Uint16 *)&clearString) \
+
+#define lcdClearTopRow()            char clearString[] = "                "; \
+                                    lcdRow1(); \
+                                    lcdString((Uint16 *)&clearString) \
+
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  *                        TYPEDEFS
@@ -86,6 +95,10 @@ void gpioTimerCheckInit();
 
 __interrupt void cpuTimer1ISR(void);
 __interrupt void Mcbsp_RxINTB_ISR(void);
+
+void pt3_io(void);
+void pt3_interpolation(void);
+void pt3_decimation(void);
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -385,19 +398,467 @@ void main()
         boolTimer1 = 0;
 
         // send out data to just left channel
-        McbspbRegs.DXR2.all = DataInLeft;
+        McbspbRegs.DXR2.all = DataInMono;
 
         // Transfer won't happen until DXR1 is written to
-        McbspbRegs.DXR1.all = 0x0000; // newLeftDataOut;
-
-        // send out data to just right channel
-        McbspbRegs.DXR2.all = DataInRight;
-
-        // Transfer won't happen until DXR1 is written to
-        McbspbRegs.DXR1.all = 0x0000; // newRightDataOut;
+        McbspbRegs.DXR1.all = DataInMono;
     }
 }
 #endif
+#ifdef PT3
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * This function implements interpolation and decimation.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void main()
+{
+    // global variable initialization
+    ch_sel      = LEFT;
+    DataInLeft  = 0;
+    DataInRight = 0;
+    LR_received = 0;
+
+    DINT;  // Enable Global interrupt INTM
+    DRTM;  // Enable Global realtime interrupt DBGM
+
+    InitSysCtrl();              // disable watchdog
+    Interrupt_initModule();     // initialize PIE and clear PIE registers.
+    Interrupt_initVectorTable(); // initializes the PIE vector table with pointers to the shell ISRs.
+    Interrupt_register(INT_TIMER1, &cpuTimer1ISR); // set the timer interrupt to point at the cpuTimerISR
+    Interrupt_disable(INT_TIMER1);
+    EALLOW;
+
+    sramSpiInit();              // SPI module for SRAM reads and writes
+    lcdInit();                  // initialize GPIO for I2C communication to LCD
+    gpioTimerCheckInit();       // GPIO 123 used to probe timer interrupt
+    timer1Init(TIMER_PERIOD);   // initialize timer1 interrupt on Int13 at 10 Hz
+    initCodecLeds();            // turned off by default
+    initCodecButtons();         // set as inputs
+    initCodecSwitches();        // set as inputs
+
+    InitSPIA();
+    InitBigBangedCodecSPI();
+    Interrupt_enable(INT_MCBSPB_RX); //INT_MCBSPB_RX);
+    Interrupt_register(INT_MCBSPB_RX, &Mcbsp_RxINTB_ISR); // set I2S RX interrupt to ISR address
+    InitMcBSPb();               // initialize I2S for sound input/output
+
+    InitAIC23();                // initialize Codec's command registers
+
+    // Enable global Interrupts and higher priority real-time debug events:
+    EINT;  // Enable Global interrupt INTM
+    ERTM;  // Enable Global realtime interrupt DBGM
+
+    clearCodecLeds();
+
+    // amplify the input lines to the max volume
+    Uint16 command = lhp_volctl(0x7F);
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
+    command = rhp_volctl(0x7F);
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
+    lcdDisableCursorBlinking();
+
+    Uint16 buttons = 0;
+    Uint32 switches = 0;
+    Uint32 prevSwitches = 0xDEAD; // dummy value to force frequency change initially
+
+    while(1)
+    {
+        switches = getCodecSwitches();
+        buttons = getCodecButtons();
+
+        // +-----+-----+-----+-----+ FREQUENCY SELECTION +-----+-----+-----+-----+
+        // set the Codec sampling frequency and timer frequency
+        // if it is not equal to the previous frequency value.
+        if (switches != prevSwitches)
+        {
+            DINT;
+            DRTM;
+
+            lcdClearBottomRow();
+
+            // input, output frequency select
+            switch (switches)
+            {
+                case 0x00:
+                {
+                    // 48K INPUTS -------------------------------------------------
+
+                    // 48 KHz
+                    command = CLKsampleratecontrol (SR48);
+
+                    // 48 KHz output
+                    float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_48));
+                    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
+
+                    // update frequencies on LCD
+                    char freqString[] = "I: 48K - O: 48K";
+                    lcdRow2();
+                    lcdString((Uint16 *)&freqString);
+                    break;
+                }
+
+                case 0x01:
+                {
+                    // 48 KHz sampling rate
+                    command = CLKsampleratecontrol (SR48);
+
+                    // 32 KHz sampling rate
+                    float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_32));
+                    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
+
+                    // update frequencies on LCD
+                    char freqString[] = "I: 48K - O: 32K";
+                    lcdRow2();
+                    lcdString((Uint16 *)&freqString);
+                    break;
+                }
+
+                case 0x02:
+                {
+                    // 48 KHz sampling rate
+                    command = CLKsampleratecontrol (SR48);
+
+                    // 8 KHz sampling rate
+                    float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_8));
+                    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
+
+                    // update frequencies on LCD
+                    char freqString[] = "I: 48K - O: 8K";
+                    lcdRow2();
+                    lcdString((Uint16 *)&freqString);
+                    break;
+                }
+
+                case 0x03:
+                {
+                    // 32K INPUTS -------------------------------------------------
+
+                    // 32 KHz sampling rate
+                    command = CLKsampleratecontrol (SR32);
+
+                    // 48 KHz sampling rate
+                    float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_48));
+                    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
+
+                    // update frequencies on LCD
+                    char freqString[] = "I: 32K - O: 48K";
+                    lcdRow2();
+                    lcdString((Uint16 *)&freqString);
+                    break;
+                }
+
+                case 0x04:
+                {
+                    // 32 KHz sampling rate
+                    command = CLKsampleratecontrol (SR32);
+
+                    // 32 KHz sampling rate
+                    float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_32));
+                    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
+
+                    // update frequencies on LCD
+                    char freqString[] = "I: 32K - O: 32K";
+                    lcdRow2();
+                    lcdString((Uint16 *)&freqString);
+                    break;
+                }
+
+                case 0x05:
+                {
+                    // 32 KHz sampling rate
+                    command = CLKsampleratecontrol (SR32);
+
+                    // 48 KHz sampling rate
+                    float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_8));
+                    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
+
+                    // update frequencies on LCD
+                    char freqString[] = "I: 32K - O: 8K";
+                    lcdRow2();
+                    lcdString((Uint16 *)&freqString);
+                    break;
+                }
+
+                case 0x06:
+                {
+                    // 8K INPUTS -------------------------------------------------
+
+                    // 8 KHz sampling rate
+                    command = CLKsampleratecontrol (SR8);
+
+                    // 48 KHz sampling rate
+                    float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_48));
+                    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
+
+                    // update frequencies on LCD
+                    char freqString[] = "I: 8K - O: 48K";
+                    lcdRow2();
+                    lcdString((Uint16 *)&freqString);
+                    break;
+                }
+
+                case 0x07:
+                {
+                    // 8 KHz sampling rate
+                    command = CLKsampleratecontrol (SR8);
+
+                    // 48 KHz sampling rate
+                    float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_32));
+                    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
+
+                    // update frequencies on LCD
+                    char freqString[] = "I: 8K - O: 32K";
+                    lcdRow2();
+                    lcdString((Uint16 *)&freqString);
+                    break;
+                }
+
+                default:
+                {
+                    // 8 KHz sampling rate
+                    command = CLKsampleratecontrol (SR8);
+
+                    // 48 KHz sampling rate
+                    float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_8));
+                    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
+
+                    // update frequencies on LCD
+                    char freqString[] = "I: 8K - O: 8K";
+                    lcdRow2();
+                    lcdString((Uint16 *)&freqString);
+                    break;
+                }
+            }
+
+            // send the updated sampling rate to the codec
+            BitBangedCodecSpiTransmit (command);
+            SmallDelay();
+
+            // start the timer interrupt again
+            CPUTimer_startTimer(CPUTIMER1_BASE);
+
+            EINT;
+            ERTM;
+        }
+
+        prevSwitches = switches;
+
+        // +-----+-----+-----+-----+ TEST SELECTION +-----+-----+-----+-----+
+
+        if (buttons == LEFT_BUTTON)
+        {
+            lcdClearTopRow();
+
+            // update test running on LCD
+            char testString[] = "I/O";
+            lcdRow1();
+            lcdString((Uint16 *)&testString);
+
+            pt3_io();
+        }
+        else if (buttons == MIDDLE_BUTTON)
+        {
+            lcdClearTopRow();
+
+            // update test running on LCD
+            char testString[] = "Interpolation";
+            lcdRow1();
+            lcdString((Uint16 *)&testString);
+
+            pt3_interpolation();
+        }
+        else if (buttons == RIGHT_BUTTON)
+        {
+            lcdClearTopRow();
+
+            // update test running on LCD
+            char testString[] = "Decimation";
+            lcdRow1();
+            lcdString((Uint16 *)&testString);
+
+            pt3_decimation();
+        }
+    }
+}
+#endif
+
+/*
+ * +=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+
+ * FUNCTIONS
+ * +=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+
+ */
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: Sample at a selected input frequency, store,
+ * and output at the other selected frequency.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void pt3_io(void)
+{
+    int16 dataOut;
+    int16 dataIn;
+
+    clearCodecLeds();
+
+    // fill the buffer with samples at selected frequency
+    for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i++)
+    {
+        // wait for a new sample to be received from the codec
+        // and wait for the sampling frequency interrupt
+        while (LR_received == 0);
+        LR_received = 0;
+
+        dataOut = (int16)DataInMono; // float -> int16
+
+        sramCircularWrite(SRAM_MIN_ADDR + i, (Uint16 *)&dataOut, 1);
+    }
+
+    setCodecLeds(LED0);
+
+    // use the output frequency for outputting the samples
+    // fill the buffer with samples at selected frequency
+    for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i++)
+    {
+        sramCircularRead(SRAM_MIN_ADDR + i, (Uint16 *)&dataIn, 1);
+
+        // wait for a new sample to be received from the codec
+        // and wait for the sampling frequency interrupt
+        while (boolTimer1 == 0);
+        boolTimer1 = 0;
+
+        // send out data to just right channel
+        McbspbRegs.DXR2.all = dataIn;
+
+        // Transfer data to the left channel
+        McbspbRegs.DXR1.all = dataIn;
+    }
+
+    setCodecLeds(LED1);
+    DELAY_US(100000);
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: Sample at a selected input frequency, store,
+ * interpolate, and output at the other selected frequency.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void pt3_interpolation(void)
+{
+    int16 dataOut[2];
+    float prevDataOut;
+    int16 dataIn;
+
+    clearCodecLeds();
+
+    // fill the buffer with samples at selected frequency
+    for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i+=2)
+    {
+        // wait for a new sample to be received from the codec
+        // and wait for the sampling frequency interrupt
+        while (LR_received == 0);
+        LR_received = 0;
+
+        // store the new sample value
+        dataOut[1] = (int16)DataInMono;
+
+        // interpolate the previous value and the new sample
+        dataOut[0] = (int16)(((float)dataOut[1] + prevDataOut)/2.0f);
+
+        // assign the new sample to be the previous sample
+        prevDataOut = (float)dataOut[1];
+
+        sramCircularWrite(SRAM_MIN_ADDR + i, (Uint16 *)&dataOut, 2);
+    }
+
+    setCodecLeds(LED0);
+
+    // use the output frequency for outputting the samples
+    // fill the buffer with samples at selected frequency
+    for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i++)
+    {
+        sramCircularRead(SRAM_MIN_ADDR + i, (Uint16 *)&dataIn, 1);
+
+        // wait for a new sample to be received from the codec
+        // and wait for the sampling frequency interrupt
+        while (boolTimer1 == 0);
+        boolTimer1 = 0;
+
+        // send out data to just right channel
+        McbspbRegs.DXR2.all = dataIn;
+
+        // Transfer data to the left channel
+        McbspbRegs.DXR1.all = dataIn;
+    }
+
+    setCodecLeds(LED1);
+    DELAY_US(100000);
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: Sample at a selected input frequency, store every
+ * nth sample, and output at another frequency.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void pt3_decimation(void)
+{
+    int16 dataOut;
+    int16 dataIn;
+
+    clearCodecLeds();
+
+    // fill the buffer with samples at selected frequency until
+    // j reaches the final address of the SRAM
+    Uint32 j = 0;
+    for (Uint64 i = 0; j < (Uint32)SRAM_LENGTH; i++)
+    {
+        // wait for a new sample to be received from the codec
+        // and wait for the sampling frequency interrupt
+        while (LR_received == 0);
+        LR_received = 0;
+
+        // skip every sample until it reaches the DECIMATION_SIZE
+        if (i % DECIMATION_SIZE > 0)
+        {
+            continue;
+        }
+
+        dataOut = (int16)DataInMono; // float -> int16
+
+        sramCircularWrite(SRAM_MIN_ADDR + j, (Uint16 *)&dataOut, 1);
+        j++;
+    }
+
+    setCodecLeds(LED0);
+
+    // use the output frequency for outputting the samples
+    // fill the buffer with samples at selected frequency
+    for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i++)
+    {
+        sramCircularRead(SRAM_MIN_ADDR + i, (Uint16 *)&dataIn, 1);
+
+        // wait for a new sample to be received from the codec
+        // and wait for the sampling frequency interrupt
+        while (boolTimer1 == 0);
+        boolTimer1 = 0;
+
+        // send out data to just right channel
+        McbspbRegs.DXR2.all = dataIn;
+
+        // Transfer data to the left channel
+        McbspbRegs.DXR1.all = dataIn;
+    }
+
+    setCodecLeds(LED1);
+    DELAY_US(100000);
+}
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
