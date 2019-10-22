@@ -89,6 +89,7 @@ typedef enum i2sSide
  */
 
 void adcA0Init();
+void interruptInit();
 
 void initCPUTimers(void);
 void configCPUTimer(uint32_t, float, float);
@@ -96,6 +97,7 @@ void gpioTimerCheckInit();
 
 __interrupt void cpuTimer1ISR(void);
 __interrupt void Mcbsp_RxINTB_ISR(void);
+interrupt void ISR_rightButton(void);
 
 void pt3_io(void);
 void pt3_interpolation(void);
@@ -118,6 +120,8 @@ volatile float DataInLeft;
 volatile float DataInRight;
 volatile int16 DataInMono;
 volatile Uint16 LR_received;
+
+volatile Uint16 writeOrRead;
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -717,6 +721,7 @@ void main()
 
     sramSpiInit();              // SPI module for SRAM reads and writes
     lcdInit();                  // initialize GPIO for I2C communication to LCD
+    lcdDisableCursorBlinking();
     gpioTimerCheckInit();       // GPIO 123 used to probe timer interrupt
     timer1Init(TIMER_PERIOD);   // initialize timer1 interrupt on Int13 at 10 Hz
     initCodecLeds();            // turned off by default
@@ -730,6 +735,7 @@ void main()
     InitMcBSPb();               // initialize I2S for sound input/output
 
     InitAIC23();                // initialize Codec's command registers
+    interruptInit();            // enables GPIO interrupts for the RIGHT button
 
     // Enable global Interrupts and higher priority real-time debug events:
     EINT;  // Enable Global interrupt INTM
@@ -746,15 +752,15 @@ void main()
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
 
-    // command = aaudpath(); // enable the microphone
-    // BitBangedCodecSpiTransmit (command);
-    // SmallDelay();
-    //
-    // command = fullpowerup(); // turn on the mic for testing
-    // BitBangedCodecSpiTransmit (command);
-    // SmallDelay();
+    // ----------------------------------------------------
+    command = aaudpath(); // enable the microphone
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
 
-    lcdDisableCursorBlinking();
+    command = fullpowerup(); // turn on the mic for testing
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+    // ----------------------------------------------------
 
     // 48 KHz
     command = CLKsampleratecontrol (SR48);
@@ -768,13 +774,16 @@ void main()
     lcdRow1();
     lcdString((Uint16 *)&string);
 
+    char string2[] = "a = x.x";
+    lcdRow2();
+    lcdString((Uint16*)&string2);
+
     Uint16 p;
     float a = 0.4f;
     Uint32 index = 0;
 
     Uint16 buttons = 0;
     Uint32 switches = 0;
-    Uint32 prevSwitches = 0xDEAD; // dummy value to force frequency change initially
     void (*effect)(Uint16, float, Uint32) = &reverb;
 
     // initialize the buffer by filling with values..
@@ -794,10 +803,11 @@ void main()
         // increase sample delay in increments of 10 ms
         p = (Uint16)((float)switches*(float)REVERB_INCREMENT_TIME*SAMPLING_FREQUENCY);
 
-        // buttons determine which effect the effect point at.
-        if (buttons == RIGHT_BUTTON)
+        // LEFT - echo becomes the output effect
+        // MIDDLE - reverb becomes the output effect
+        if (buttons == MIDDLE_BUTTON)
         {
-            lcdClear();
+            lcdClearTopRow();
             char s[] = "Reverb";
             lcdRow1();
             lcdString((Uint16 *)&s);
@@ -805,11 +815,34 @@ void main()
         }
         else if (buttons & LEFT_BUTTON)
         {
-            lcdClear();
+            lcdClearTopRow();
             char s[] = "Echo";
             lcdRow1();
             lcdString((Uint16 *)&s);
             effect = &echo;
+        }
+
+        // RIGHT (interrupt response) - increase 'a' from 0.0 to 1.0 in increments of 0.1
+        if (writeOrRead)
+        {
+            // increment the coefficient 'a' unless the
+            if (a < 1.0f)
+                a += 0.1f;
+            else
+                a = 0.0f;
+
+            // convert the value of 'a' to ASCII characters to output on the LCD
+            float ones = a;
+            float tenths = (a - (float)((Uint16)ones)) * 10;
+
+            char s[] = "0.0\0";
+            s[0] = INT_TO_ASCII((Uint16)ones);
+            s[2] = INT_TO_ASCII((Uint16)tenths);
+            lcdRow2();
+            lcdCursor(0x40 + 4);     // move cursor to "a = [X].x"
+            lcdString((Uint16*)&s);
+
+            writeOrRead = 0;
         }
 
         // call the effect and increment the buffer address
@@ -886,8 +919,29 @@ void reverb(Uint16 p, float a, Uint32 index)
  */
 void echo(Uint16 p, float a, Uint32 index)
 {
-    McbspbRegs.DXR2.all = DataInMono;   // tx
-    McbspbRegs.DXR1.all = DataInMono;   // tx
+    // Get the new sample to output to the codec ----------------
+    while (LR_received == 0);
+    LR_received = 0;
+
+    // save the new sample in SRAM to be used by the reverb later
+    int16 sample = DataInMono;     // x[n]
+
+    // (1-a)x[n] (new sample)
+    int16 xn = (int16)((1.0f - a)*(float)((int16)sample));
+
+    // x[n-p] sample from buffer (sample = old_sample)
+    sramCircularRead(SRAM_MIN_ADDR + index - p, (Uint16 *)&sample, 1);
+
+    // a*x[n-p] (old sample)
+    int16 yn_p = (int16)(a*((float)sample));
+
+    // final echo formula
+    xn += yn_p;
+
+    sramCircularWrite(SRAM_MIN_ADDR + index, (Uint16 *)&xn, 1); // write the output to the buffer
+
+    McbspbRegs.DXR2.all = xn;   // tx
+    McbspbRegs.DXR1.all = xn;   // tx
 }
 
 /*
@@ -1087,6 +1141,44 @@ void gpioTimerCheckInit()
 }
 
 /*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: interruptInit
+ * This function initializes GPIO interrupts for the right
+ * button.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void interruptInit()
+{
+    // assign the interrupt vectors to the appropriate functions
+    EALLOW;
+    PieVectTable.XINT1_INT = &ISR_rightButton;
+
+    // enable the interrupts INT1/2
+    PieCtrlRegs.PIECTRL.bit.ENPIE = 1; // Enable the PIE block
+    PieCtrlRegs.PIEIER1.bit.INTx4 = 1; // Enable PIE Group 1 INT4
+    IER |= M_INT1;                     // Enable CPU INT1
+
+    // configure the GPIO as inputs
+    EALLOW;
+    GpioCtrlRegs.GPAGMUX1.bit.GPIO14 = 0;
+    GpioCtrlRegs.GPAMUX1.bit.GPIO14 = 0;         // GPIO
+    GpioCtrlRegs.GPADIR.bit.GPIO14 = 0;          // input
+    GpioCtrlRegs.GPAQSEL1.bit.GPIO14 = 0;        // XINT1 Synch to SYSCLKOUT only
+    GpioCtrlRegs.GPAPUD.bit.GPIO14 = 0;
+
+    // configure XINT1 and XINT2
+    XintRegs.XINT1CR.bit.POLARITY = 1; // Rising edge interrupt
+
+    XintRegs.XINT1CR.bit.ENABLE = 1; // Enable XINT1
+    EDIS;
+
+    // assign interrupts INT1/2 to GPIO 14/16
+    GPIO_SetupXINT1Gpio(14);
+
+    EINT; // Enable Global Interrupts
+}
+
+/*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  * INTERRUPT SERVICE ROUTINES (ISR)
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -1122,4 +1214,19 @@ __interrupt void Mcbsp_RxINTB_ISR(void)
 
     // acknowledge interrupt
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP6;
+}
+
+/*
+ * Interrupt to increase the coefficient of the reverb and echo filters.
+ */
+interrupt void ISR_rightButton(void)
+{
+    writeOrRead = 0x1;
+
+    DINT;
+    DELAY_US(5000);
+    EINT;
+
+    // Acknowledge interrupt for group 1
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
 }
