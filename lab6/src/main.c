@@ -35,6 +35,7 @@
 #define SAMPLING_FREQUENCY          (2.0f*SAMPLING_FREQUENCY_A)
 #define TIMER_PERIOD                (float)(1000000.0f/SAMPLING_FREQUENCY) // in uSeconds
 #define REVERB_INCREMENT_TIME       0.01f // in seconds
+#define ECHO_INCREMENT_TIME         0.25f // in seconds
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -753,13 +754,13 @@ void main()
     SmallDelay();
 
     // ----------------------------------------------------
-    command = aaudpath(); // enable the microphone
-    BitBangedCodecSpiTransmit (command);
-    SmallDelay();
-
-    command = fullpowerup(); // turn on the mic for testing
-    BitBangedCodecSpiTransmit (command);
-    SmallDelay();
+    // command = aaudpath(); // enable the microphone
+    // BitBangedCodecSpiTransmit (command);
+    // SmallDelay();
+    //
+    // command = fullpowerup(); // turn on the mic for testing
+    // BitBangedCodecSpiTransmit (command);
+    // SmallDelay();
     // ----------------------------------------------------
 
     // 48 KHz
@@ -799,9 +800,6 @@ void main()
     {
         switches = getCodecSwitches();
         buttons = getCodecButtons();
-
-        // increase sample delay in increments of 10 ms
-        p = (Uint16)((float)switches*(float)REVERB_INCREMENT_TIME*SAMPLING_FREQUENCY);
 
         // LEFT - echo becomes the output effect
         // MIDDLE - reverb becomes the output effect
@@ -844,6 +842,12 @@ void main()
 
             writeOrRead = 0;
         }
+
+        // increase sample delay in increments (10ms = reverb, 250ms = echo)
+        if (effect == &reverb)
+            p = (Uint16)((float)switches*(float)REVERB_INCREMENT_TIME*SAMPLING_FREQUENCY); // increments of 10 ms
+        else
+            p = (Uint16)((float)switches*(float)ECHO_INCREMENT_TIME*SAMPLING_FREQUENCY); // increments of 250 ms
 
         // call the effect and increment the buffer address
         (*effect)(p, a, index);
