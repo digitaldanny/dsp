@@ -34,6 +34,7 @@
 #define SAMPLING_FREQUENCY_8        8000.0f
 #define SAMPLING_FREQUENCY          (2.0f*SAMPLING_FREQUENCY_A)
 #define TIMER_PERIOD                (float)(1000000.0f/SAMPLING_FREQUENCY) // in uSeconds
+#define REVERB_INCREMENT_TIME       0.01f // in seconds
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -102,6 +103,7 @@ void pt3_decimation(void);
 
 void reverb(Uint16 p, float a, Uint32 index);
 void echo(Uint16 p, float a, Uint32 index);
+int16 avg2(int16 a, int16 b);
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -744,13 +746,13 @@ void main()
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
 
-    command = aaudpath(); // enable the microphone
-    BitBangedCodecSpiTransmit (command);
-    SmallDelay();
-
-    command = fullpowerup(); // turn on the mic for testing
-    BitBangedCodecSpiTransmit (command);
-    SmallDelay();
+    // command = aaudpath(); // enable the microphone
+    // BitBangedCodecSpiTransmit (command);
+    // SmallDelay();
+    //
+    // command = fullpowerup(); // turn on the mic for testing
+    // BitBangedCodecSpiTransmit (command);
+    // SmallDelay();
 
     lcdDisableCursorBlinking();
 
@@ -766,7 +768,7 @@ void main()
     lcdRow1();
     lcdString((Uint16 *)&string);
 
-    Uint16 p = 50000;
+    Uint16 p;
     float a = 0.4f;
     Uint32 index = 0;
 
@@ -789,6 +791,10 @@ void main()
         switches = getCodecSwitches();
         buttons = getCodecButtons();
 
+        // increase sample delay in increments of 10 ms
+        p = (Uint16)((float)switches*(float)REVERB_INCREMENT_TIME*SAMPLING_FREQUENCY);
+
+        // buttons determine which effect the effect point at.
         if (buttons == RIGHT_BUTTON)
         {
             lcdClear();
@@ -821,9 +827,28 @@ void main()
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: avg2
+ * This function averages together 2 int16 samples and
+ * returns an int16 result.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+int16 avg2(int16 a, int16 b)
+{
+    float af = (int16)a;
+    float bf = (int16)b;
+    af += bf;               // sum
+    af /= 2.0f;             // average
+    return (int16)a;        // package for output
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  * SUMMARY: reverb
  * Implements the following function..
  * y[n] = (1-a)x[n] + ax[n-p]
+ *
+ * GLOBALS:
+ * DataInMono - int16 sample from the McBSP codec isr.
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
 void reverb(Uint16 p, float a, Uint32 index)
@@ -833,20 +858,23 @@ void reverb(Uint16 p, float a, Uint32 index)
     LR_received = 0;
 
     // save the new sample in SRAM to be used by the reverb later
-    int16 dataOut = DataInMono;     // x[n]
-    sramCircularWrite(SRAM_MIN_ADDR + index, (Uint16 *)&dataOut, 1);
+    int16 sample = DataInMono;     // x[n]
+    sramCircularWrite(SRAM_MIN_ADDR + index, (Uint16 *)&sample, 1);
 
-    // (1-a)x[n]
-    dataOut = (int16)((1.0f - a)*(float)((int16)DataInMono));
-    McbspbRegs.DXR2.all = dataOut;   // tx
-    McbspbRegs.DXR1.all = dataOut;   // tx
+    // (1-a)x[n] (new sample)
+    int16 xn = (int16)((1.0f - a)*(float)((int16)sample));
 
-    // Get x[n-p] to be output as reverb -----------
-    sramCircularRead(SRAM_MIN_ADDR + index - p, (Uint16 *)&dataOut, 1);
+    // x[n-p] sample from buffer (sample = old_sample)
+    sramCircularRead(SRAM_MIN_ADDR + index - p, (Uint16 *)&sample, 1);
 
-    dataOut = (int16)(a*((float)dataOut));
-    McbspbRegs.DXR2.all = dataOut;   // tx
-    McbspbRegs.DXR1.all = dataOut;   // tx
+    // a*x[n-p] (old sample)
+    int16 xn_p = (int16)(a*((float)sample));
+
+    // final reverb formula
+    xn += xn_p;
+
+    McbspbRegs.DXR2.all = xn;   // tx
+    McbspbRegs.DXR1.all = xn;   // tx
 }
 
 /*
