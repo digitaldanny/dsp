@@ -5,13 +5,28 @@
  * | Depending on whether PT1 or PT2 is defined, the selected portion|
  * | of code will be compiled and run on the board.                  |
  * |                                                                 |
- * | part1_main:                                                     |
- * | This program reads in a voltage on one of the MCU's A/D pins    |
- * | and outputs it on the LCD in the following format:              |
- * |                    "Voltage = X.XX V"                           |
+ * | part1_main: Audio Mixing - SRAM Memory Tests in C               |
+ * | This program fills the SRAM buffer with new mono samples from   |
+ * | the codec using the left button, mixes samples stored in the    |
+ * | SRAM buffer with new samples from the codec using the middle    |
+ * | button, and outputs the samples stored in SRAM to the codec     |
+ * | using the right button.                                         |
  * |                                                                 |
- * | part2_main:                                                     |
- * | This program echos an input sound out onto the Codec's DAC jack.|
+ * | part2_main: Basic Sampling                                      |
+ * | This program inputs and outputs A/D+D/A samples at varying      |
+ * | frequencies to show the aliasing that happens when devices      |
+ * | sample sounds at different frequencies.                         |
+ * |                                                                 |
+ * | part3_main: Interpolation and Decimation                        |
+ * | This program shows how higher and lower quality outputs can be  |
+ * | achieved from high or low sample frequencies. Interpolation     |
+ * | allows higher quality outputs to be created from few samples.   |
+ * | Decimation allows lower quality outputs to be created from      |
+ * | many samples.                                                   |
+ * |                                                                 |
+ * | part4_main: Echo and Reverb                                     |
+ * | This program introduces LTI system manipulation through         |
+ * | implementation of reverb and echo filters.                      |
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
 
@@ -19,13 +34,14 @@
 #include "driverlib.h"
 #include "device.h"
 #include "RTDSP.h"
+#include <math.h>
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  *                      CONFIGURATIONS
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  */
-#define PT4
+#define QUIZ
 #define DECIMATION_SIZE             2
 
 #define SAMPLING_FREQUENCY_A        46875.0f
@@ -36,6 +52,7 @@
 #define TIMER_PERIOD                (float)(1000000.0f/SAMPLING_FREQUENCY) // in uSeconds
 #define REVERB_INCREMENT_TIME       0.01f // in seconds
 #define ECHO_INCREMENT_TIME         0.25f // in seconds
+#define FLANGER_INCREMENT_TIME      0.15f // in seconds
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -106,6 +123,7 @@ void pt3_decimation(void);
 
 void reverb(Uint16 p, float a, Uint32 index);
 void echo(Uint16 p, float a, Uint32 index);
+void flanger(Uint16 p, float a, Uint32 index);
 int16 avg2(int16 a, int16 b);
 
 /*
@@ -855,12 +873,169 @@ void main()
     }
 }
 #endif
+#ifdef QUIZ
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * This function implements interpolation and decimation.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void main()
+{
+    // global variable initialization
+    ch_sel      = LEFT;
+    DataInLeft  = 0;
+    DataInRight = 0;
+    LR_received = 0;
+
+    DINT;  // Enable Global interrupt INTM
+    DRTM;  // Enable Global realtime interrupt DBGM
+
+    InitSysCtrl();              // disable watchdog
+    Interrupt_initModule();     // initialize PIE and clear PIE registers.
+    Interrupt_initVectorTable(); // initializes the PIE vector table with pointers to the shell ISRs.
+    Interrupt_register(INT_TIMER1, &cpuTimer1ISR); // set the timer interrupt to point at the cpuTimerISR
+    Interrupt_disable(INT_TIMER1);
+    EALLOW;
+
+    sramSpiInit();              // SPI module for SRAM reads and writes
+    lcdInit();                  // initialize GPIO for I2C communication to LCD
+    lcdDisableCursorBlinking();
+    gpioTimerCheckInit();       // GPIO 123 used to probe timer interrupt
+    timer1Init(TIMER_PERIOD);   // initialize timer1 interrupt on Int13 at 10 Hz
+    initCodecLeds();            // turned off by default
+    initCodecButtons();         // set as inputs
+    initCodecSwitches();        // set as inputs
+
+    InitSPIA();
+    InitBigBangedCodecSPI();
+    Interrupt_enable(INT_MCBSPB_RX); //INT_MCBSPB_RX);
+    Interrupt_register(INT_MCBSPB_RX, &Mcbsp_RxINTB_ISR); // set I2S RX interrupt to ISR address
+    InitMcBSPb();               // initialize I2S for sound input/output
+
+    InitAIC23();                // initialize Codec's command registers
+    interruptInit();            // enables GPIO interrupts for the RIGHT button
+
+    // Enable global Interrupts and higher priority real-time debug events:
+    EINT;  // Enable Global interrupt INTM
+    ERTM;  // Enable Global realtime interrupt DBGM
+
+    clearCodecLeds();
+
+    // amplify the input lines to the max volume
+    Uint16 command = lhp_volctl(0x7F);
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
+    command = rhp_volctl(0x7F);
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
+    // 48 KHz
+    command = CLKsampleratecontrol (SR48);
+
+    // 48 KHz output
+    float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_48));
+    configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
+
+    // update frequencies on LCD
+    lcdClearTopRow();
+    char s[] = "Flanger";
+    lcdRow1();
+    lcdString((Uint16 *)&s);
+
+    char s2[] = "a = x.x";
+    lcdRow2();
+    lcdString((Uint16 *)&s2);
+
+    Uint16 p;
+    float a = 0.4f;
+    Uint32 index = 0;
+
+    Uint16 buttons = 0;
+    Uint32 switches = 0;
+
+    // initialize the buffer by filling with values..
+    for (Uint32 i = 0; i < (Uint32)SRAM_LENGTH; i++)
+    {
+        while (LR_received == 0);
+        LR_received = 0;
+        Uint16 dataOut = (int16)DataInMono; // float -> int16
+        sramCircularWrite(SRAM_MIN_ADDR + i, (Uint16 *)&dataOut, 1);
+    }
+
+    while(1)
+    {
+        switches = getCodecSwitches();
+        buttons = getCodecButtons();
+
+        // RIGHT (interrupt response) - increase 'a' from 0.0 to 1.0 in increments of 0.1
+        if (writeOrRead)
+        {
+            // increment the coefficient 'a' unless the
+            if (a < 1.0f)
+                a += 0.1f;
+            else
+                a = 0.0f;
+
+            // convert the value of 'a' to ASCII characters to output on the LCD
+            float ones = a;
+            float tenths = (a - (float)((Uint16)ones)) * 10;
+
+            char s[] = "0.0\0";
+            s[0] = INT_TO_ASCII((Uint16)ones);
+            s[2] = INT_TO_ASCII((Uint16)tenths);
+            lcdRow2();
+            lcdCursor(0x40 + 4);     // move cursor to "a = [X].x"
+            lcdString((Uint16*)&s);
+
+            writeOrRead = 0;
+        }
+
+        // increase sample delay in increments (10ms = reverb, 250ms = echo)
+        p = (Uint16)((float)switches*(float)FLANGER_INCREMENT_TIME*SAMPLING_FREQUENCY); // increments of 10 ms
+
+        // call the effect and increment the buffer address
+        flanger(p, a, index);
+        index++;
+    }
+}
+#endif
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+
  * FUNCTIONS
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+=====+
  */
+
+void flanger(Uint16 p, float a, Uint32 index)
+{
+    // Get the new sample to output to the codec ----------------
+    while (LR_received == 0);
+    LR_received = 0;
+
+    // save the new sample in SRAM to be used by the reverb later
+    int16 sample = DataInMono;     // x[n]
+
+    // (1-a)x[n] (new sample)
+    int16 xn = (int16)((1.0f - a)*(float)((int16)sample));
+
+    // x[n-p] sample from buffer (sample = old_sample)
+    sramCircularRead(SRAM_MIN_ADDR + index - p, (Uint16 *)&sample, 1);
+
+    // a*x[n-p] (old sample)
+    int16 yn_p = (int16)(a*((float)sample));
+
+    float flangerFloat = sin(2.0f*M_PI*((float)index)/46875.0f);
+    yn_p = (int16)((float)yn_p * flangerFloat); // modulation with 1Hz sine wave
+
+    // final echo formula
+    xn += yn_p;
+
+    sramCircularWrite(SRAM_MIN_ADDR + index, (Uint16 *)&xn, 1); // write the output to the buffer
+
+    McbspbRegs.DXR2.all = xn;   // tx
+    McbspbRegs.DXR1.all = xn;   // tx
+}
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
