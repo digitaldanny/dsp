@@ -1,0 +1,9 @@
+% run the filter scripts to generate coefficients
+hpf
+lpf
+
+% create the C useable coefficient table
+hpfCoefPrintout = springf('\n%0.18f,', hpcoef);
+lpfCoefPrintout = springf('\n%0.18f,', lpcoef);
+
+hpfCoefPrintout
