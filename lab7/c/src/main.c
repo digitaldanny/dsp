@@ -1,13 +1,9 @@
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  * | SUMMARY: main.c                                                 |
- * | This program contains 2 main parts (part1_main and part2_main). |
- * | Depending on whether PT1 or PT2 is defined, the selected portion|
- * | of code will be compiled and run on the board.                  |
- * |                                                                 |
- * | part1_main: Low Pass FIR Filter
- * | part2_main: High Pass FIR Filter
- * | part3_main: Band Pass IIR Filter
+ * | This program runs a LPF, HPF, and BPF in real time on the input |
+ * | sound from the line in. The filter can be selected using the    |
+ * | 3 codec push buttons.                                           |
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
 
@@ -228,7 +224,16 @@ void main()
     clearCodecLeds();
 
     // amplify the input lines to the max volume
-    Uint16 command = lhp_volctl(0x7F);
+    Uint16 command = linput_volctl(0x1F);
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
+    command = rinput_volctl(0x1F);
+    BitBangedCodecSpiTransmit (command);
+    SmallDelay();
+
+    // amplify the headphone lines to the max volume
+    command = lhp_volctl(0x7F);
     BitBangedCodecSpiTransmit (command);
     SmallDelay();
 
