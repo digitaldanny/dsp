@@ -1,4 +1,6 @@
 % hpf and lpf scripts are expected to have run before executing this script
+hpcoef = hpfilter.Numerator;
+lpcoef = lpfilter.Numerator;
 
 % create the C useable coefficient table
 hpfCoefPrintout = sprintf('\n%0.18ff, %0.18ff, %0.18ff, %0.18ff, ', hpcoef);
