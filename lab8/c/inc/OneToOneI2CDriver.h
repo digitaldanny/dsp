@@ -15,11 +15,22 @@
  *                   WRAPPER MACROS
  * +=====+=====+=====+=====+=====+=====+=====+=====+
  */
+
 #define lcdRow1()             lcdCommand(0x80 | 0x00) // moves cursor to the first line of the LCD
 #define lcdRow2()             lcdCommand(0x80 | 0x40) // moves cursor to the second line of the LCD
 #define lcdClear()            lcdCommand(0x01)        // clears the LCD screen
 #define lcdCursor(OFFSET)     lcdCommand(0x80 | OFFSET) // moves cursor to CURSOR value
+#define lcdCursorRow1(OFFSET) lcdCommand(0x80 | OFFSET) // moves cursor to CURSOR value
+#define lcdCursorRow2(OFFSET) lcdCommand(0x80 | (0x40 + OFFSET));
 #define lcdDisableCursorBlinking()   lcdCommand(0x0C)    // stops lcd cursor from blinking
+
+#define lcdClearBottomRow()         char clearString[] = "                "; \
+                                    lcdRow2(); \
+                                    lcdString((Uint16 *)&clearString) \
+
+#define lcdClearTopRow()            char clearString[] = "                "; \
+                                    lcdRow1(); \
+                                    lcdString((Uint16 *)&clearString) \
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+
