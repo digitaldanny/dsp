@@ -13,6 +13,8 @@
 
 #include "RTDSP_Sampling.h"
 
+#define TWO_CHANNEL
+
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  * SUMMARY: initCodec
@@ -27,12 +29,19 @@
  * ~ Initializes McBSP interrupt for receiving codec samples (assumes Mcbsp_RxINTB_ISR is available)
  * ~ Clear the codec LEDs
  *
+ * INPUTS:
+ * --------------------
+ * mcbspIntEn
+ * --------------------
+ * CODEC_MCBSPB_INT_DIS - disable McBSPb interrupts (used for DMA ping-pong)
+ * CODEC_MCBSPB_INT_EN - enable McBSPb interrupts
+ *
  * FUTURE IMPLEMENTATION:
  * __interrupt void cpuTimer1ISR(void);
  * interrupt void ISR_rightButton(void);
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-void initCodec(void)
+void initCodec(Uint16 mcbspIntEn)
 {
     // global variable initialization
     ch_sel      = LEFT;
@@ -61,9 +70,18 @@ void initCodec(void)
 
     InitSPIA();
     InitBigBangedCodecSPI();
-    Interrupt_enable(INT_MCBSPB_RX); //INT_MCBSPB_RX);
-    Interrupt_register(INT_MCBSPB_RX, &Mcbsp_RxINTB_ISR); // set I2S RX interrupt to ISR address
-    InitMcBSPb();               // initialize I2S for sound input/output
+
+    if (mcbspIntEn == CODEC_MCBSPB_INT_EN)
+    {
+        Interrupt_enable(INT_MCBSPB_RX);
+        Interrupt_register(INT_MCBSPB_RX, &Mcbsp_RxINTB_ISR); // set I2S RX interrupt to ISR address
+        InitMcBSPb(1); // initialize I2S for sound input/output with receive interrupt enabled
+    }
+    else
+    {
+        Interrupt_disable(INT_MCBSPB_RX);
+        InitMcBSPb(0); // initialize I2S for sound input/output with receive interrupt disabled
+    }
 
     InitAIC23();                // initialize Codec's command registers
 
@@ -104,7 +122,6 @@ void init_dma(int16 * ping, int16 * pong, Uint32 transferSize)
 {
     EALLOW;    // Allow access to EALLOW protected registers
     PieVectTable.DMA_CH1_INT= &RTDSP_DMA_CH1_ISR;
-    PieVectTable.DMA_CH2_INT= &RTDSP_DMA_CH2_ISR;
 
     CpuSysRegs.SECMSEL.bit.PF2SEL = 1;
 
@@ -114,9 +131,9 @@ void init_dma(int16 * ping, int16 * pong, Uint32 transferSize)
     DmaRegs.CH1.MODE.bit.CHINTE = 0;
 
     // Channel 1, McBSPB transmit buffer 1
-    DmaRegs.CH1.BURST_SIZE.all = 0;       // 1 word/burst
-    DmaRegs.CH1.SRC_BURST_STEP = 0;       // no effect when using 1 word/burst
-    DmaRegs.CH1.DST_BURST_STEP = 0;       // no effect when using 1 word/burst
+    DmaRegs.CH1.BURST_SIZE.all = 1;       // 2 word/burst
+    DmaRegs.CH1.SRC_BURST_STEP = 1;       // no effect when using 1 word/burst
+    DmaRegs.CH1.DST_BURST_STEP = 1;       // no effect when using 1 word/burst
     DmaRegs.CH1.TRANSFER_SIZE = transferSize-1; // Interrupt every frame
                                           // (127 bursts/transfer)
     DmaRegs.CH1.SRC_TRANSFER_STEP = 1;    // Move to next word in buffer after
@@ -143,13 +160,18 @@ void init_dma(int16 * ping, int16 * pong, Uint32 transferSize)
     DmaClaSrcSelRegs.DMACHSRCSEL1.bit.CH1 = DMA_MREVTB; // Trigger on McBSPb_RX
     DmaRegs.CH1.CONTROL.bit.PERINTCLR = 1;   // Clear any spurious interrupt flags
 
+    PieCtrlRegs.PIEIER7.bit.INTx1 = 1;   // Enable PIE Group 7, INT 1 (DMA CH1)
+
+#ifdef TWO_CHANNEL
     //
     // Channel 2, McBSPB Receive buffer 2
     //
-    DmaRegs.CH2.MODE.bit.CHINTE = 0;
-    DmaRegs.CH2.BURST_SIZE.all = 0;        // 1 word/burst
-    DmaRegs.CH2.SRC_BURST_STEP = 0;        // no effect when using 1 word/burst
-    DmaRegs.CH2.DST_BURST_STEP = 0;        // no effect when using 1 word/burst
+    PieVectTable.DMA_CH2_INT= &RTDSP_DMA_CH2_ISR;
+
+    DmaRegs.CH2.MODE.bit.CHINTE = 1;
+    DmaRegs.CH2.BURST_SIZE.all = 1;        // 1 word/burst
+    DmaRegs.CH2.SRC_BURST_STEP = 1;        // no effect when using 1 word/burst
+    DmaRegs.CH2.DST_BURST_STEP = 1;        // no effect when using 1 word/burst
     DmaRegs.CH2.TRANSFER_SIZE = transferSize - 1;       // Interrupt every 127 bursts/transfer
     DmaRegs.CH2.SRC_TRANSFER_STEP = 0;     // Don't move source address
     DmaRegs.CH2.DST_TRANSFER_STEP = 1;     // Move to next word in buffer after
@@ -180,10 +202,10 @@ void init_dma(int16 * ping, int16 * pong, Uint32 transferSize)
     DmaClaSrcSelRegs.DMACHSRCSEL1.bit.CH2 = DMA_MREVTB; // Trigger on McBSPb_RX
     DmaRegs.CH2.CONTROL.bit.PERINTCLR = 1; // Clear any spurious interrupt flags
 
-    PieCtrlRegs.PIEIER7.bit.INTx1 = 1;   // Enable PIE Group 7, INT 1 (DMA CH1)
     PieCtrlRegs.PIEIER7.bit.INTx2 = 1;   // Enable PIE Group 7, INT 2 (DMA CH2)
-    IER |= 0x40;                            // Enable CPU INT groups 6 and 7
+#endif
 
+    IER |= 0x40;                            // Enable CPU INT groups 6 and 7
     EDIS;
 }
 
@@ -196,7 +218,10 @@ void init_dma(int16 * ping, int16 * pong, Uint32 transferSize)
 void start_dma (void)
 {
   EALLOW;
-  DmaRegs.CH1.CONTROL.bit.RUN = 1;      // Start DMA Transmit from McBSP-A
-  DmaRegs.CH2.CONTROL.bit.RUN = 1;      // Start DMA Receive from McBSP-A
+  DmaRegs.CH1.CONTROL.bit.RUN = 1;      // Start DMA Transmit from McBSP-B
+
+#ifdef TWO_CHANNEL
+  DmaRegs.CH2.CONTROL.bit.RUN = 1;      // Start DMA Receive from McBSP-B
+#endif
   EDIS;
 }

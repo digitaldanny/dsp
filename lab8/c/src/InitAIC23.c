@@ -70,7 +70,11 @@ void InitAIC23()
 
 }
 
-void InitMcBSPb()
+/*
+ * mcbspIntEn : 1 => receive interrupt enabled
+ *            : 0 => receive interrupt disabled
+ */
+void InitMcBSPb(Uint16 mcbspIntEn)
 {
     /* Init McBSPb GPIO Pins */
 
@@ -132,7 +136,10 @@ void InitMcBSPb()
     McbspbRegs.MFFINT.all=0x0; // Disable all interrupts
 
     // McbspbRegs.SPCR1.bit.RINTM = 0; // McBSP interrupt flag - RRDY
-    McbspbRegs.SPCR1.bit.RINTM = 2;
+    if (mcbspIntEn == 1)
+        McbspbRegs.SPCR1.bit.RINTM = 2;
+    else
+        McbspbRegs.SPCR1.bit.RINTM = 0;
 
     McbspbRegs.SPCR2.bit.XINTM = 0; // McBSP interrupt flag - XRDY
 

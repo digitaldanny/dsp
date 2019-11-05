@@ -20,7 +20,7 @@
 #define CodecSPI_CS_HIGH {EALLOW; GpioDataRegs.GPASET.bit.GPIO19 = 1;}
 
 /***************** User Functions *****************/
-void InitMcBSPb();
+void InitMcBSPb(Uint16 mcbspIntEn);
 void InitSPIA();
 void InitAIC23();
 void SpiTransmit(uint16_t data);
@@ -34,22 +34,5 @@ void BitBangedCodecSpiTransmit(Uint16 data);
  * This function sets the line_in and hp_out gains to the max.
  */
 void AIC23MaxIOGain(void);
-
-/*
- * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
- * SUMMARY: initCodec
- * This function initializes the following parameters..
- *
- * (extern) ch_sel
- * (extern) DataInLeft
- * (extern) DataInRight
- * (extern) LR_received
- *
- * ~ Sets Codec input / output gains to the max
- * ~ Initializes McBSP interrupt for receiving codec samples (assumes Mcbsp_RxINTB_ISR is available)
- * ~ Clear the codec LEDs
- * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
- */
-void initCodec(void);
 
 #endif /* INC_INITAIC23_H_ */

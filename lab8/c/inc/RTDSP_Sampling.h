@@ -23,6 +23,22 @@ typedef enum i2sSide
     RIGHT
 } i2sSide_t;
 
+/*
+ * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
+ *                        DEFINES
+ * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
+ */
+
+#define startDmaCh1()   EALLOW; \
+                        DmaRegs.CH1.CONTROL.bit.RUN = 1; \
+                        EDIS \
+
+#define startDmaCh2()   EALLOW; \
+                        DmaRegs.CH2.CONTROL.bit.RUN = 1; \
+                        EDIS \
+
+#define CODEC_MCBSPB_INT_DIS    0
+#define CODEC_MCBSPB_INT_EN     1
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -59,7 +75,7 @@ extern __interrupt void RTDSP_DMA_CH2_ISR(void);
  * interrupt void ISR_rightButton(void);
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-void initCodec(void);
+void initCodec(Uint16 mcbspIntEn);
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+

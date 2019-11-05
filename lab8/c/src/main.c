@@ -106,7 +106,7 @@ volatile Uint16 ch2_flag;
  */
 void main()
 {
-    initCodec(); // sets up codec and processor for sampling at 48 KHz
+    initCodec(CODEC_MCBSPB_INT_EN); // sets up codec and processor for sampling at 48 KHz
 
     // update frequencies on LCD
     char s1[] = "Freq = XXXX Hz";
@@ -165,11 +165,11 @@ void main()
 void main()
 {
     // sets up codec and processor for sampling at 48 KHz
-    initCodec();
+    initCodec(CODEC_MCBSPB_INT_DIS);
 
     // set up DMA for 256 frame ping-pong
     init_dma(&frames[0].buffer[0], &frames[1].buffer[0], SIZE_OF_DFT);
-    start_dma();
+    startDmaCh1();
 
     // update frequencies on LCD
     char s1[] = "Freq = XXXX Hz";
@@ -334,7 +334,6 @@ polar_t searchMaxBin (float * bin, Uint16 len, float freqPerBin)
  */
 __interrupt void Mcbsp_RxINTB_ISR(void)
 {
-
     DataInRight = (int16)McbspbRegs.DRR2.all;               // Right data in DSP mode
     DataInLeft = (int16)McbspbRegs.DRR1.all;                // Left data in DSP mode
     DataInMono = (int16)((DataInRight + DataInLeft)/2.0f);  // Mono = average of left and right
@@ -364,7 +363,9 @@ __interrupt void Mcbsp_RxINTB_ISR(void)
     GpioDataRegs.GPDDAT.bit.GPIO123 = 0;
 
     // acknowledge interrupt
+    EALLOW;
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP6;
+    EDIS;
 }
 
 /*
@@ -378,6 +379,7 @@ __interrupt void RTDSP_DMA_CH1_ISR(void)
     DmaRegs.CH1.CONTROL.bit.HALT = 1;
 
     ch1_flag = 1;
+    startDmaCh2(); // pong
 
     // allow more interrupts on channel 1
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP7;
@@ -396,6 +398,7 @@ __interrupt void RTDSP_DMA_CH2_ISR(void)
     DmaRegs.CH2.CONTROL.bit.HALT = 1;
 
     ch2_flag = 1;
+    startDmaCh1(); // ping
 
     // allow more interrupts on channel 2
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP7;
