@@ -103,11 +103,11 @@ void main()
     initCodec(); // sets up codec and processor for sampling at 48 KHz
 
     // update frequencies on LCD
-    char s1[] = "Max Freq = XXXX Hz";
+    char s1[] = "Freq = XXXX Hz";
     lcdRow1();
     lcdString((Uint16 *)&s1);
 
-    char s2[] = "Max Mag = XXXX dB";
+    char s2[] = "Mag = XXXX dB";
     lcdRow2();
     lcdString((Uint16 *)&s2);
 
@@ -149,6 +149,69 @@ void main()
     }
 }
 #endif
+#ifdef PT2
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * This function implements 256 point DFT
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void main()
+{
+    initCodec(); // sets up codec and processor for sampling at 48 KHz
+
+    // update frequencies on LCD
+    char s1[] = "Freq = XXXX Hz";
+    lcdRow1();
+    lcdString((Uint16 *)&s1);
+
+    char s2[] = "Mag = XXXX dB";
+    lcdRow2();
+    lcdString((Uint16 *)&s2);
+
+    // **************************************************//
+    // initialize globals                                //
+    // **************************************************//
+    frames[0].count         = 0;                         //
+    frames[0].nextFrame     = &frames[1];                //
+    frames[0].process       = &dft;                      //
+                                                         //
+    frames[1].count         = 0;                         //
+    frames[1].nextFrame     = &frames[0];                //
+    frames[1].process       = &dft;                      //
+                                                         //
+    dftFrame                = &frames[0];                //
+    storeFrame              = &frames[0];                //
+    // **************************************************//
+
+    while(1)
+    {
+        // ------------------------------------------------------
+        // DFT PROCESSING
+        // ------------------------------------------------------
+        if (dftFrame->count == SIZE_OF_DFT-1)
+        {
+            // 1.) perform dft on dftBuffer if buffer is full
+            dftFrame->process(dftFrame->buffer, bin, NUM_DFT_BINS, SIZE_OF_DFT);
+
+            // 2.) stores max magnitude and frequency to the LCD
+            testPointMax = searchMaxBin (bin, NUM_DFT_BINS, FREQ_PER_BIN);
+
+            // 3.) reset count/lock for the current DFT frame so it can store samples later
+            dftFrame->count = 0;
+            dftFrame->waitingToProcess = 0;
+
+            // 4.) switch dft pointer to point at the next buffer
+            dftFrame = dftFrame->nextFrame;
+        }
+    }
+}
+#endif
+
+/*
+ * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
+ * FUNCTIONS
+ * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
+ */
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
@@ -193,6 +256,7 @@ void dft (int16 * buffer, float * bin, Uint16 numBins, Uint16 dftSize)
 polar_t searchMaxBin (float * bin, Uint16 len, float freqPerBin)
 {
     char wr[5] = "X.XX"; // store ASCII versions of DFT magnitude in here..
+    char wr2[8] = "XXXXX.X"; // store ASCII versions of the max frequency here..
     float max = 0.0f;
     Uint16 maxK = 0;
     polar_t conversion;
@@ -212,35 +276,42 @@ polar_t searchMaxBin (float * bin, Uint16 len, float freqPerBin)
     max = 10.0f*log10f(max);
 
     // 2.) Output the max bin magnitude to the LCD
-    float ones         = max;
-    float tenths       = (max - (float)((Uint16)ones)) * 10;
-    float hundredths   = (tenths - (float)((Uint16)tenths)) * 10;
+    float tens         = max / 10.0f;
+    float ones         = (tens - (Uint16)tens) * 10;
+    float tenths       = (ones - (Uint16)ones) * 10;
+    float hundredths   = (tenths - (Uint16)tenths) * 10;
 
     // Convert voltage to characters and store to the LCD
-    wr[0] = INT_TO_ASCII((Uint16)ones); // 1's place (Ex. [1].23)
-    wr[1] = '.';
-    wr[2] = INT_TO_ASCII((Uint16)tenths); // 10th's place (Ex. 1.[2]3)
-    wr[3] = INT_TO_ASCII((Uint16)hundredths); // 10th's place (Ex. 1.2[3])
+    wr[0] = INT_TO_ASCII((Uint16)tens);
+    wr[1] = INT_TO_ASCII((Uint16)ones); // 1's place (Ex. [1].23)
+    wr[2] = '.';
+    wr[3] = INT_TO_ASCII((Uint16)tenths); // 10th's place (Ex. 1.[2]3)
     wr[4] = '\0';
 
-    lcdCursorRow2(10); // offset t.o the X.XX decimal voltage value
+    lcdCursorRow2(6); // offset t.o the X.XX decimal voltage value
     lcdString((Uint16*)&wr);
 
     // 3.) Output the max frequency to the LCD
-    float maxFreq = (float)maxK * freqPerBin;
-    //float thousands = maxFreq / 1000.0f;
-    //float hundreds = maxFreq
-    ones         = maxFreq;
-    tenths       = (maxFreq - (float)((Uint16)ones)) * 10;
-    hundredths   = (tenths - (float)((Uint16)tenths)) * 10;
+    float maxFreq       = (float)maxK * freqPerBin;
+    float tenThousands  = maxFreq / 10000.0f;
+    float thousands     = (tenThousands - (Uint16)tenThousands) * 10;
+    float hundreds      = (thousands - (Uint16)thousands) * 10;
+    tens                = (hundreds - (Uint16)hundreds) * 10;
+    ones                = (tens - (Uint16)tens) * 10;
+    tenths              = (ones - (Uint16)ones) * 10;
 
     // Convert voltage to characters and store to the LCD
-    wr[0] = INT_TO_ASCII((Uint16)ones); // 1's place (Ex. [1].23)
-    wr[2] = INT_TO_ASCII((Uint16)tenths); // 10th's place (Ex. 1.[2]3)
-    wr[3] = INT_TO_ASCII((Uint16)hundredths); // 10th's place (Ex. 1.2[3])
+    wr2[0] = INT_TO_ASCII((Uint16)tenThousands);
+    wr2[1] = INT_TO_ASCII((Uint16)thousands);
+    wr2[2] = INT_TO_ASCII((Uint16)hundreds);
+    wr2[3] = INT_TO_ASCII((Uint16)tens);
+    wr2[4] = INT_TO_ASCII((Uint16)ones);
+    wr2[5] = '.';
+    wr2[6] = INT_TO_ASCII((Uint16)tenths);
+    wr2[7] = '\0';
 
-    lcdCursorRow1(11);
-    lcdString((Uint16*)&wr);
+    lcdCursorRow1(7);
+    lcdString((Uint16*)&wr2);
 
     // create the return structure
     conversion.magnitude = max;
