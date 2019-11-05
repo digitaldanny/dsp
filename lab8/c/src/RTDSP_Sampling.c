@@ -84,3 +84,119 @@ void initCodec(void)
     //float period = (1000000.0f/(2.0f*SAMPLING_FREQUENCY_48));
     //configCPUTimer(CPUTIMER1_BASE, DEVICE_SYSCLK_FREQ, period);
 }
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: init_dma
+ * Initialize DMA for ping-pong sampling for word sizes == 16.
+ *
+ * INPUTS:
+ * ping - address of the first sample buffer
+ * pong - address of the second sample buffer
+ * transferSize - size of the frame to transfer before interrupting
+ *
+ * GLOBALS (must be declared in external file):
+ * __interrupt void DMA_CH1_ISR(void)
+ * __interrupt void DMA_CH2_ISR(void)
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void init_dma(int16 * ping, int16 * pong, Uint32 transferSize)
+{
+    EALLOW;    // Allow access to EALLOW protected registers
+    PieVectTable.DMA_CH1_INT= &RTDSP_DMA_CH1_ISR;
+    PieVectTable.DMA_CH2_INT= &RTDSP_DMA_CH2_ISR;
+
+    CpuSysRegs.SECMSEL.bit.PF2SEL = 1;
+
+    DmaRegs.DMACTRL.bit.HARDRESET = 1;
+    __asm(" NOP");                        // Only 1 NOP needed per Design
+
+    DmaRegs.CH1.MODE.bit.CHINTE = 0;
+
+    // Channel 1, McBSPB transmit buffer 1
+    DmaRegs.CH1.BURST_SIZE.all = 0;       // 1 word/burst
+    DmaRegs.CH1.SRC_BURST_STEP = 0;       // no effect when using 1 word/burst
+    DmaRegs.CH1.DST_BURST_STEP = 0;       // no effect when using 1 word/burst
+    DmaRegs.CH1.TRANSFER_SIZE = transferSize-1; // Interrupt every frame
+                                          // (127 bursts/transfer)
+    DmaRegs.CH1.SRC_TRANSFER_STEP = 1;    // Move to next word in buffer after
+                                          // each word in a burst
+    DmaRegs.CH1.DST_TRANSFER_STEP = 0;    // Don't move destination address
+    DmaRegs.CH1.SRC_ADDR_SHADOW = (Uint32)&McbspbRegs.DRR1.all; // Start address = McBSPB DRR
+    DmaRegs.CH1.SRC_BEG_ADDR_SHADOW = (Uint32)&McbspbRegs.DRR1.all;
+    DmaRegs.CH1.DST_ADDR_SHADOW = (Uint32) &ping; // ping buffer is the destination
+    //
+    // Not needed unless using wrap function
+    //
+    DmaRegs.CH1.DST_BEG_ADDR_SHADOW = (Uint32) &ping;
+    DmaRegs.CH1.CONTROL.bit.PERINTCLR = 1;   // Clear peripheral interrupt event flag.
+    DmaRegs.CH1.CONTROL.bit.ERRCLR = 1;      // Clear sync error flag
+    DmaRegs.CH1.DST_WRAP_SIZE = 0xFFFF;      // Put to maximum - don't want
+                                             // destination wrap.
+    DmaRegs.CH1.SRC_WRAP_SIZE = 0xFFFF;      // Put to maximum - don't want
+                                             // source wrap.
+    DmaRegs.CH1.MODE.bit.CHINTE = 1;         // Enable channel interrupt
+    DmaRegs.CH1.MODE.bit.CHINTMODE = 1;      // Interrupt at end of transfer
+    DmaRegs.CH1.MODE.bit.PERINTE = 1;        // Enable peripheral interrupt event
+    DmaRegs.CH1.MODE.bit.PERINTSEL = 1;      // Peripheral interrupt select = McBSP MXSYNCA
+
+    DmaClaSrcSelRegs.DMACHSRCSEL1.bit.CH1 = DMA_MREVTB; // Trigger on McBSPb_RX
+    DmaRegs.CH1.CONTROL.bit.PERINTCLR = 1;   // Clear any spurious interrupt flags
+
+    //
+    // Channel 2, McBSPB Receive buffer 2
+    //
+    DmaRegs.CH2.MODE.bit.CHINTE = 0;
+    DmaRegs.CH2.BURST_SIZE.all = 0;        // 1 word/burst
+    DmaRegs.CH2.SRC_BURST_STEP = 0;        // no effect when using 1 word/burst
+    DmaRegs.CH2.DST_BURST_STEP = 0;        // no effect when using 1 word/burst
+    DmaRegs.CH2.TRANSFER_SIZE = transferSize - 1;       // Interrupt every 127 bursts/transfer
+    DmaRegs.CH2.SRC_TRANSFER_STEP = 0;     // Don't move source address
+    DmaRegs.CH2.DST_TRANSFER_STEP = 1;     // Move to next word in buffer after
+                                           // each word in a burst
+    DmaRegs.CH2.SRC_ADDR_SHADOW = (Uint32) &McbspbRegs.DRR1.all; // Start address
+                                                                 // = McBSPB DRR
+    //
+    // Not needed unless using wrap function
+    //
+    DmaRegs.CH2.SRC_BEG_ADDR_SHADOW = (Uint32) &McbspbRegs.DRR1.all;
+    DmaRegs.CH2.DST_ADDR_SHADOW = (Uint32) &pong;      // Start address =
+                                                           // Receive buffer
+                                                           // (for McBSP-B)
+    DmaRegs.CH2.DST_BEG_ADDR_SHADOW = (Uint32) &pong;  // Not needed unless
+                                                           // using wrap function
+    DmaRegs.CH2.CONTROL.bit.PERINTCLR = 1; // Clear peripheral interrupt event
+                                           // flag.
+    DmaRegs.CH2.CONTROL.bit.ERRCLR = 1;    // Clear sync error flag
+    DmaRegs.CH2.DST_WRAP_SIZE = 0xFFFF;    // Put to maximum - don't want
+                                           // destination wrap.
+    DmaRegs.CH2.SRC_WRAP_SIZE = 0xFFFF;    // Put to maximum - don't want
+                                           // source wrap.
+    DmaRegs.CH2.MODE.bit.CHINTE = 1;       // Enable channel interrupt
+    DmaRegs.CH2.MODE.bit.CHINTMODE = 1;    // Interrupt at end of transfer
+    DmaRegs.CH2.MODE.bit.PERINTE = 1;      // Enable peripheral interrupt event
+    DmaRegs.CH2.MODE.bit.PERINTSEL = 2;    // Peripheral interrupt select =
+                                           // McBSP MRSYNCB
+    DmaClaSrcSelRegs.DMACHSRCSEL1.bit.CH2 = DMA_MREVTB; // Trigger on McBSPb_RX
+    DmaRegs.CH2.CONTROL.bit.PERINTCLR = 1; // Clear any spurious interrupt flags
+
+    PieCtrlRegs.PIEIER7.bit.INTx1 = 1;   // Enable PIE Group 7, INT 1 (DMA CH1)
+    PieCtrlRegs.PIEIER7.bit.INTx2 = 1;   // Enable PIE Group 7, INT 2 (DMA CH2)
+    IER |= 0x40;                            // Enable CPU INT groups 6 and 7
+
+    EDIS;
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: start_dma
+ * Start DMA on channels 1 and 2
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void start_dma (void)
+{
+  EALLOW;
+  DmaRegs.CH1.CONTROL.bit.RUN = 1;      // Start DMA Transmit from McBSP-A
+  DmaRegs.CH2.CONTROL.bit.RUN = 1;      // Start DMA Receive from McBSP-A
+  EDIS;
+}

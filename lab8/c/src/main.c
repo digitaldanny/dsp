@@ -18,7 +18,7 @@
  *                      CONFIGURATIONS
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  */
-#define PT1
+#define PT2
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -63,6 +63,8 @@ void dft (int16*, float*, Uint16, Uint16);
 polar_t searchMaxBin (float * bin, Uint16 len, float freqPerBin);
 
 __interrupt void Mcbsp_RxINTB_ISR(void);
+__interrupt void RTDSP_DMA_CH1_ISR(void);
+__interrupt void RTDSP_DMA_CH2_ISR(void);
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -79,12 +81,16 @@ volatile float DataInRight;
 volatile int16 DataInMono;
 volatile Uint16 LR_received;
 
-// ping pong buffers ---------------------------
+// ping pong buffers
 frame_t frames[2];     // 2 buffers for ping-ponging processing and sampling
 frame_t * dftFrame;    // points at the frame to be processed
 frame_t * storeFrame;  // points at the frame to store new values
 float bin[NUM_DFT_BINS]; // stores result of dft256 function
 polar_t testPointMax;
+
+// DMA flags
+volatile Uint16 ch1_flag;
+volatile Uint16 ch2_flag;
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -152,12 +158,18 @@ void main()
 #ifdef PT2
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
- * This function implements 256 point DFT
+ * This function implements 256 point DFT with DMA for
+ * ping-pong buffer switching.
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
 void main()
 {
-    initCodec(); // sets up codec and processor for sampling at 48 KHz
+    // sets up codec and processor for sampling at 48 KHz
+    initCodec();
+
+    // set up DMA for 256 frame ping-pong
+    init_dma(&frames[0].buffer[0], &frames[1].buffer[0], SIZE_OF_DFT);
+    start_dma();
 
     // update frequencies on LCD
     char s1[] = "Freq = XXXX Hz";
@@ -171,38 +183,28 @@ void main()
     // **************************************************//
     // initialize globals                                //
     // **************************************************//
-    frames[0].count         = 0;                         //
-    frames[0].nextFrame     = &frames[1];                //
     frames[0].process       = &dft;                      //
-                                                         //
-    frames[1].count         = 0;                         //
-    frames[1].nextFrame     = &frames[0];                //
     frames[1].process       = &dft;                      //
                                                          //
-    dftFrame                = &frames[0];                //
-    storeFrame              = &frames[0];                //
+    ch1_flag                = 0;                         //
+    ch2_flag                = 0;                         //
     // **************************************************//
 
     while(1)
     {
-        // ------------------------------------------------------
-        // DFT PROCESSING
-        // ------------------------------------------------------
-        if (dftFrame->count == SIZE_OF_DFT-1)
+        if (ch1_flag)
         {
-            // 1.) perform dft on dftBuffer if buffer is full
-            dftFrame->process(dftFrame->buffer, bin, NUM_DFT_BINS, SIZE_OF_DFT);
-
-            // 2.) stores max magnitude and frequency to the LCD
-            testPointMax = searchMaxBin (bin, NUM_DFT_BINS, FREQ_PER_BIN);
-
-            // 3.) reset count/lock for the current DFT frame so it can store samples later
-            dftFrame->count = 0;
-            dftFrame->waitingToProcess = 0;
-
-            // 4.) switch dft pointer to point at the next buffer
-            dftFrame = dftFrame->nextFrame;
+            frames[0].process(frames[0].buffer, bin, NUM_DFT_BINS, SIZE_OF_DFT);
+            ch1_flag = 0;
         }
+
+        if (ch2_flag)
+        {
+            frames[1].process(frames[1].buffer, bin, NUM_DFT_BINS, SIZE_OF_DFT);
+            ch2_flag = 0;
+        }
+
+        testPointMax = searchMaxBin (bin, NUM_DFT_BINS, FREQ_PER_BIN);
     }
 }
 #endif
@@ -326,7 +328,9 @@ polar_t searchMaxBin (float * bin, Uint16 len, float freqPerBin)
  */
 
 /*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  * Codec Audio input interrupt - DSP mode requires 1 interrupt
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
 __interrupt void Mcbsp_RxINTB_ISR(void)
 {
@@ -361,4 +365,41 @@ __interrupt void Mcbsp_RxINTB_ISR(void)
 
     // acknowledge interrupt
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP6;
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * local_D_INTCH1_ISR - DMA ISR for channel 1 (INT7.1)
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+__interrupt void RTDSP_DMA_CH1_ISR(void)
+{
+    EALLOW;
+    DmaRegs.CH1.CONTROL.bit.HALT = 1;
+
+    ch1_flag = 1;
+
+    // allow more interrupts on channel 1
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP7;
+    EDIS;
+    return;
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * local_D_INTCH2_ISR - DMA ISR for channel 2 (INT7.2)
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+__interrupt void RTDSP_DMA_CH2_ISR(void)
+{
+    EALLOW;
+    DmaRegs.CH2.CONTROL.bit.HALT = 1;
+
+    ch2_flag = 1;
+
+    // allow more interrupts on channel 2
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP7;
+    EDIS;
+
+    return;
 }

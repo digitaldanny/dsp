@@ -37,6 +37,8 @@ extern volatile float DataInRight;
 extern volatile int16 DataInMono;
 extern volatile Uint16 LR_received;
 extern __interrupt void Mcbsp_RxINTB_ISR(void);
+extern __interrupt void RTDSP_DMA_CH1_ISR(void);
+extern __interrupt void RTDSP_DMA_CH2_ISR(void);
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
@@ -58,5 +60,21 @@ extern __interrupt void Mcbsp_RxINTB_ISR(void);
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
 void initCodec(void);
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: init_dma
+ * Initialize DMA for ping-pong sampling for word sizes == 16.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void init_dma(int16 * ping, int16 * pong, Uint32 transferSize);
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: start_dma
+ * Start DMA on channels 1 and 2
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void start_dma (void);
 
 #endif // SRC_RTDSP_SAMPLING_H_ //
