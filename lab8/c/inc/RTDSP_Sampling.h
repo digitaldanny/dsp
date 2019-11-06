@@ -104,4 +104,12 @@ void init_dma(int16 * ping, int16 * pong, Uint32 transferSize);
  */
 void initDmaPingPong(int16 * ping, int16 * pong, Uint32 transferSize, void(*ISR)(void));
 
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: startDmaChannels
+ * This function starts both DMA channels at approximately the same time
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void startDmaChannels(void);
+
 #endif // SRC_RTDSP_SAMPLING_H_ //

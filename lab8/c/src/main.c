@@ -26,6 +26,8 @@
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  */
 
+#pragma DATA_SECTION(frames, "share")  // DMA-accessible RAM
+
 #define SIZE_OF_DFT     256
 #define NUM_DFT_BINS    128
 #define FREQ_PER_BIN    187.5f //(48000.0f / (float)SIZE_OF_DFT)
@@ -179,7 +181,7 @@ void main()
     InitPieVectTable();         // set PIE vectors to default shell ISRs
 
     // sets up codec and processor for sampling at 48 KHz
-    initDmaPingPong(&frames[0].buffer[0], &frames[1].buffer[0], SIZE_OF_DFT, &DMA_FRAME_COMPLETE_ISR);
+    initDmaPingPong(&frames[0].buffer[0], &frames[0].buffer[0], SIZE_OF_DFT, &DMA_FRAME_COMPLETE_ISR);
     initCodec(CODEC_MCBSPB_INT_DIS);
 
     // Enable global Interrupts and higher priority real-time debug events:
@@ -388,5 +390,5 @@ __interrupt void DMA_FRAME_COMPLETE_ISR(void)
     PieCtrlRegs.PIEACK.all |= PIEACK_GROUP7; // ACK to receive more interrupts from this PIE groups
     EDIS;
 
-    StartDMACH6();
+    startDmaChannels();
 }

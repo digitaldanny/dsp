@@ -13,11 +13,6 @@
 
 #include "RTDSP_Sampling.h"
 
-//#pragma DATA_SECTION(DMA_CH6_Source, "ramgs6")  // DMA-accessible RAM
-//#pragma DATA_SECTION(DMA_CH6_Dest, "ramgs6")    // DMA-accessible RAM
-volatile int16 * DMA_CH6_Source;
-volatile int16 * DMA_CH6_Dest;
-
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  * SUMMARY: initCodec
@@ -112,53 +107,87 @@ void initCodec(Uint16 mcbspIntEn)
  */
 void initDmaPingPong(int16 * ping, int16 * pong, Uint32 transferSize, void(*ISR)(void))
 {
+    // ----------------------------------------------------------------------------
+    // HEADER
+    // ----------------------------------------------------------------------------
     DINT;
 
     //pie vector -> stolen from TI code
     EALLOW;  // This is needed to write to EALLOW protected registers
-    PieVectTable.DMA_CH6_INT= (PINT)ISR;
+    PieVectTable.DMA_CH6_INT= (PINT)ISR; // only 1 interrupt needed for both DMA channels because they run concurrently
     EDIS;    // This is needed to disable write to EALLOW protected registers
 
     //Initialize DMA -> stolen from TI code
     DMAInitialize();
 
+    // ----------------------------------------------------------------------------
+    // DMA_CH6: Configure this channel for collecting new samples from codec
+    //                                  AUDIO IN
+    // ----------------------------------------------------------------------------
+
     // source and destination pointers
-    DMA_CH6_Source = (volatile int16 *)&McbspbRegs.DRR2.all;
-    DMA_CH6_Dest = (volatile int16 *)&McbspbRegs.DXR2.all;
+    volatile Uint16 * DMA_CH6_Source = &McbspbRegs.DRR2.all;
+    volatile Uint16 * DMA_CH6_Dest   = (volatile Uint16 *)ping;
 
     // configure DMA CH6 -> modified from TI code
-    DMACH6AddrConfig((volatile Uint16 *)DMA_CH6_Dest, (volatile Uint16 *)DMA_CH6_Source);
+    DMACH6AddrConfig(DMA_CH6_Dest, DMA_CH6_Source);
     DMACH6BurstConfig(BURST,1,1);
     DMACH6TransferConfig(TRANSFER,1,1);
     DMACH6ModeConfig(74,PERINT_ENABLE,ONESHOT_DISABLE,CONT_DISABLE,
                      SYNC_DISABLE,SYNC_SRC,OVRFLOW_DISABLE,SIXTEEN_BIT,
                      CHINT_END,CHINT_ENABLE);
 
+    // ----------------------------------------------------------------------------
+    // DMA_CH5: Configure this channel for sending processed data to codec audio out
+    //                                 AUDIO OUT
+    // ----------------------------------------------------------------------------
+
+    // source and destination pointers
+    volatile Uint16 * DMA_CH5_Source = (volatile Uint16 *)pong;
+    volatile Uint16 * DMA_CH5_Dest   = &McbspbRegs.DXR2.all;
+
+    // configure DMA CH6 -> modified from TI code
+    DMACH5AddrConfig(DMA_CH5_Dest, DMA_CH5_Source);
+    DMACH5BurstConfig(BURST,1,1);
+    DMACH5TransferConfig(TRANSFER,1,1);
+    DMACH5ModeConfig(74,PERINT_ENABLE,ONESHOT_DISABLE,CONT_DISABLE,
+                     SYNC_DISABLE,SYNC_SRC,OVRFLOW_DISABLE,SIXTEEN_BIT,
+                     CHINT_END,CHINT_DISABLE);
+
+    // ----------------------------------------------------------------------------
+    // TRAILER
+    // ----------------------------------------------------------------------------
 
     //something about a bandgap voltage -> stolen from TI code
     EALLOW;
     CpuSysRegs.SECMSEL.bit.PF2SEL = 1;
     EDIS;
 
-    //interrupt enabling
-    PieCtrlRegs.PIECTRL.bit.ENPIE = 1;   // Enable the PIE block
-    PieCtrlRegs.PIEIER7.bit.INTx6 = 1;   // Enable PIE Group 7, INT 2 (DMA CH2)
-    IER |= M_INT7;                         // Enable CPU INT6
-    EINT;                                // Enable Global Interrupts
-
-    EnableInterrupts();
-
-    StartDMACH6();      // Start DMA channel -> stolen from TI code
-
     //
     // Enable interrupts required for this example -> stolen from TI code
     //
-   PieCtrlRegs.PIECTRL.bit.ENPIE = 1;   // Enable the PIE block
-   PieCtrlRegs.PIEIER7.bit.INTx6 = 1;   // Enable PIE Group 7, INT 2 (DMA CH2)
-   IER |= M_INT7;                         // Enable CPU INT6
-   EINT;                                // Enable Global Interrupts
+    PieCtrlRegs.PIECTRL.bit.ENPIE = 1;   // Enable the PIE block
+    PieCtrlRegs.PIEIER7.bit.INTx6 = 1;   // Enable PIE Group 7, INT 2 (DMA CH2)
+    IER |= M_INT7;                         // Enable CPU INT6
 
-   EALLOW;
-   CpuSysRegs.SECMSEL.bit.PF2SEL = 1;
-   EDIS;
+    // Enable Global Interrupts
+    EINT;
+    EnableInterrupts();
+
+    // Start both DMA channels at the same time
+    startDmaChannels();
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: startDmaChannels
+ * This function starts both DMA channels at approximately the same time
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void startDmaChannels(void)
+{
+    EALLOW;
+    DmaRegs.CH6.CONTROL.bit.RUN = 1;
+    DmaRegs.CH5.CONTROL.bit.RUN = 1;
+    EDIS;
 }
