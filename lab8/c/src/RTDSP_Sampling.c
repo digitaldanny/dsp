@@ -132,7 +132,7 @@ void initDmaPingPong(int16 * ping, int16 * pong, Uint32 transferSize, void(*ISR)
     // configure DMA CH6 -> modified from TI code
     DMACH6AddrConfig(DMA_CH6_Dest, DMA_CH6_Source);
     DMACH6BurstConfig(BURST,1,1);
-    DMACH6TransferConfig(TRANSFER,1,1);
+    DMACH6TransferConfig(transferSize-1,1,1);
     DMACH6ModeConfig(74,PERINT_ENABLE,ONESHOT_DISABLE,CONT_DISABLE,
                      SYNC_DISABLE,SYNC_SRC,OVRFLOW_DISABLE,SIXTEEN_BIT,
                      CHINT_END,CHINT_ENABLE);
@@ -149,7 +149,7 @@ void initDmaPingPong(int16 * ping, int16 * pong, Uint32 transferSize, void(*ISR)
     // configure DMA CH6 -> modified from TI code
     DMACH5AddrConfig(DMA_CH5_Dest, DMA_CH5_Source);
     DMACH5BurstConfig(BURST,1,1);
-    DMACH5TransferConfig(TRANSFER,1,1);
+    DMACH5TransferConfig(transferSize-1,1,1);
     DMACH5ModeConfig(74,PERINT_ENABLE,ONESHOT_DISABLE,CONT_DISABLE,
                      SYNC_DISABLE,SYNC_SRC,OVRFLOW_DISABLE,SIXTEEN_BIT,
                      CHINT_END,CHINT_DISABLE);
@@ -189,5 +189,33 @@ void startDmaChannels(void)
     EALLOW;
     DmaRegs.CH6.CONTROL.bit.RUN = 1;
     DmaRegs.CH5.CONTROL.bit.RUN = 1;
+    EDIS;
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: pingPong
+ * Swap DMA channels 5/6 source and destinations
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void pingPong(void)
+{
+    EALLOW;
+
+    // grab the current addresses to switch
+    Uint32 rxAddr = (Uint32)DmaRegs.CH6.DST_ADDR_SHADOW;
+    Uint32 switcherAddr;
+    Uint32 txAddr = (Uint32)DmaRegs.CH5.SRC_ADDR_SHADOW;
+
+    // switch the address values
+    switcherAddr    = rxAddr;       // 0 = 1
+    rxAddr          = txAddr;       // 1 = 2
+    txAddr          = switcherAddr; // 2 = 0 = 1(original)
+
+    // Set up the RECEIVE buffer address:
+    DmaRegs.CH6.DST_ADDR_SHADOW     = rxAddr;
+
+    // Set up TRANSFER buffer address:
+    DmaRegs.CH5.SRC_ADDR_SHADOW     = txAddr;
     EDIS;
 }

@@ -112,4 +112,13 @@ void initDmaPingPong(int16 * ping, int16 * pong, Uint32 transferSize, void(*ISR)
  */
 void startDmaChannels(void);
 
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: pingPong
+ * Assuming that the "initDmaPingPong" configuration function was run with the same "ping" and "pong"
+ * parameters, this function will swap the buffers in the DMA channels.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void pingPong(void);
+
 #endif // SRC_RTDSP_SAMPLING_H_ //

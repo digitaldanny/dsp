@@ -84,10 +84,11 @@ volatile int16 DataInMono;
 volatile Uint16 LR_received;
 
 // ping pong buffers
-frame_t frames[2];     // 2 buffers for ping-ponging processing and sampling
-frame_t * dftFrame;    // points at the frame to be processed
-frame_t * storeFrame;  // points at the frame to store new values
-float bin[NUM_DFT_BINS]; // stores result of dft256 function
+volatile Uint16 dma_flag;   // notifies program to begin dft computation
+frame_t frames[2];          // 2 buffers for ping-ponging processing and sampling
+frame_t * dftFrame;         // points at the frame to be processed
+frame_t * storeFrame;       // points at the frame to store new values
+float bin[NUM_DFT_BINS];    // stores result of dft256 function
 polar_t testPointMax;
 
 /*
@@ -181,7 +182,7 @@ void main()
     InitPieVectTable();         // set PIE vectors to default shell ISRs
 
     // sets up codec and processor for sampling at 48 KHz
-    initDmaPingPong(&frames[0].buffer[0], &frames[0].buffer[0], SIZE_OF_DFT, &DMA_FRAME_COMPLETE_ISR);
+    initDmaPingPong(&frames[0].buffer[0], &frames[1].buffer[0], SIZE_OF_DFT, &DMA_FRAME_COMPLETE_ISR);
     initCodec(CODEC_MCBSPB_INT_DIS);
 
     // Enable global Interrupts and higher priority real-time debug events:
@@ -201,19 +202,30 @@ void main()
     // initialize globals                                //
     // **************************************************//
     frames[0].process       = &dft;                      //
+    frames[0].nextFrame     = &frames[1];                //
+                                                         //
     frames[1].process       = &dft;                      //
+    frames[1].nextFrame     = &frames[0];                //
+                                                         //
+    dftFrame                = &frames[0];                //
+    dma_flag                = 0;                         //
     // **************************************************//
 
-    while(1);
-    // {
-    //     if (dma_flag)
-    //     {
-    //         frames[0].process(frames[0].buffer, bin, NUM_DFT_BINS, SIZE_OF_DFT);
-    //         dma_flag = 0;
-    //     }
-    //
-    //     testPointMax = searchMaxBin (bin, NUM_DFT_BINS, FREQ_PER_BIN);
-    // }
+    while(1)
+    {
+        if (dma_flag)
+        {
+            // perform DFT or FFT on the processing buffer..
+            dftFrame->process(dftFrame->buffer, bin, NUM_DFT_BINS, SIZE_OF_DFT);
+            dma_flag = 0;
+
+            // next frame to be processed
+            dftFrame = dftFrame->nextFrame;
+
+            // search bins for the max frequency and display info to LCD
+            testPointMax = searchMaxBin (bin, NUM_DFT_BINS, FREQ_PER_BIN);
+        }
+    }
 }
 #endif
 
@@ -379,16 +391,18 @@ __interrupt void Mcbsp_RxINTB_ISR(void)
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  * DMA_FRAME_COMPLETE_ISR - DMA ISR for channel 6
+ * This interrupt ping-pongs the sampling buffer and the processing
+ * buffer.
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-
-//DMA interrupt -> modified from TI code
 __interrupt void DMA_FRAME_COMPLETE_ISR(void)
 {
     EALLOW;
-
     PieCtrlRegs.PIEACK.all |= PIEACK_GROUP7; // ACK to receive more interrupts from this PIE groups
     EDIS;
+
+    pingPong();     // switch buffer end-points on DMA channels
+    dma_flag = 1;   // used in program to trigger DFT calculations
 
     startDmaChannels();
 }
