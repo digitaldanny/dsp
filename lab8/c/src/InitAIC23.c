@@ -135,14 +135,6 @@ void InitMcBSPb(Uint16 mcbspIntEn)
     McbspbRegs.SPCR1.bit.RJUST = 2; // left-justify word in DRR and zero-fill LSBs
     McbspbRegs.MFFINT.all=0x0; // Disable all interrupts
 
-    // McbspbRegs.SPCR1.bit.RINTM = 0; // McBSP interrupt flag - RRDY
-    if (mcbspIntEn == 1)
-        McbspbRegs.SPCR1.bit.RINTM = 2;
-    else
-        McbspbRegs.SPCR1.bit.RINTM = 0;
-
-    McbspbRegs.SPCR2.bit.XINTM = 0; // McBSP interrupt flag - XRDY
-
     // Clear Receive Control Registers
     McbspbRegs.RCR2.all = 0x0;
     McbspbRegs.RCR1.all = 0x0;
@@ -218,8 +210,11 @@ void InitMcBSPb(Uint16 mcbspIntEn)
     // The receiver gets its clock signal from MCLKR
     McbspbRegs.PCR.bit.CLKRM = 0;
 
-    // Enable Receive Interrupt
-    McbspbRegs.MFFINT.bit.RINT = 1;
+    // McbspbRegs.SPCR1.bit.RINTM = 0; // McBSP interrupt flag - RRDY
+    // McbspbRegs.SPCR1.bit.RINTM = 2;
+    McbspbRegs.SPCR1.bit.RINTM = mcbspIntEn;
+
+    McbspbRegs.SPCR2.bit.XINTM = 0; // McBSP interrupt flag - XRDY
 
     // Ignore unexpected frame sync
     //McbspbRegs.XCR2.bit.XFIG = 1;

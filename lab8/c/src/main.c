@@ -18,7 +18,7 @@
  *                      CONFIGURATIONS
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  */
-#define PT1
+#define PT2
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -59,12 +59,12 @@ typedef struct polar
 
 void adcA0Init();
 void interruptInit();
+
 void dft (int16*, float*, Uint16, Uint16);
 polar_t searchMaxBin (float * bin, Uint16 len, float freqPerBin);
 
 __interrupt void Mcbsp_RxINTB_ISR(void);
-__interrupt void RTDSP_DMA_CH1_ISR(void);
-__interrupt void RTDSP_DMA_CH2_ISR(void);
+__interrupt void DMA_FRAME_COMPLETE_ISR(void);
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -88,10 +88,6 @@ frame_t * storeFrame;  // points at the frame to store new values
 float bin[NUM_DFT_BINS]; // stores result of dft256 function
 polar_t testPointMax;
 
-// DMA flags
-volatile Uint16 ch1_flag;
-volatile Uint16 ch2_flag;
-
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  *                         MAINS
@@ -106,8 +102,19 @@ volatile Uint16 ch2_flag;
  */
 void main()
 {
-    initCodec(CODEC_MCBSPB_INT_EN); // sets up codec and processor for sampling at 48 KHz
+    DINT;  // Enable Global interrupt INTM
+    DRTM;  // Enable Global realtime interrupt DBGM
 
+    InitSysCtrl();              // disable watchdog
+    InitPieCtrl();              // set PIE ctrl registers to default state
+    InitPieVectTable();         // set PIE vectors to default shell ISRs
+
+    // sets up codec and processor for sampling at 48 KHz
+    initCodec(CODEC_MCBSPB_INT_EN);
+
+    // Enable global Interrupts and higher priority real-time debug events:
+    EINT;  // Enable Global interrupt INTM
+    ERTM;  // Enable Global realtime interrupt DBGM
     // update frequencies on LCD
     char s1[] = "Freq = XXXX Hz";
     lcdRow1();
@@ -164,12 +171,20 @@ void main()
  */
 void main()
 {
+    DINT;  // Enable Global interrupt INTM
+    DRTM;  // Enable Global realtime interrupt DBGM
+
+    InitSysCtrl();              // disable watchdog
+    InitPieCtrl();              // set PIE ctrl registers to default state
+    InitPieVectTable();         // set PIE vectors to default shell ISRs
+
     // sets up codec and processor for sampling at 48 KHz
+    initDmaPingPong(&frames[0].buffer[0], &frames[1].buffer[0], SIZE_OF_DFT, &DMA_FRAME_COMPLETE_ISR);
     initCodec(CODEC_MCBSPB_INT_DIS);
 
-    // set up DMA for 256 frame ping-pong
-    init_dma(&frames[0].buffer[0], &frames[1].buffer[0], SIZE_OF_DFT);
-    startDmaCh1();
+    // Enable global Interrupts and higher priority real-time debug events:
+    EINT;  // Enable Global interrupt INTM
+    ERTM;  // Enable Global realtime interrupt DBGM
 
     // update frequencies on LCD
     char s1[] = "Freq = XXXX Hz";
@@ -185,27 +200,18 @@ void main()
     // **************************************************//
     frames[0].process       = &dft;                      //
     frames[1].process       = &dft;                      //
-                                                         //
-    ch1_flag                = 0;                         //
-    ch2_flag                = 0;                         //
     // **************************************************//
 
-    while(1)
-    {
-        if (ch1_flag)
-        {
-            frames[0].process(frames[0].buffer, bin, NUM_DFT_BINS, SIZE_OF_DFT);
-            ch1_flag = 0;
-        }
-
-        if (ch2_flag)
-        {
-            frames[1].process(frames[1].buffer, bin, NUM_DFT_BINS, SIZE_OF_DFT);
-            ch2_flag = 0;
-        }
-
-        testPointMax = searchMaxBin (bin, NUM_DFT_BINS, FREQ_PER_BIN);
-    }
+    while(1);
+    // {
+    //     if (dma_flag)
+    //     {
+    //         frames[0].process(frames[0].buffer, bin, NUM_DFT_BINS, SIZE_OF_DFT);
+    //         dma_flag = 0;
+    //     }
+    //
+    //     testPointMax = searchMaxBin (bin, NUM_DFT_BINS, FREQ_PER_BIN);
+    // }
 }
 #endif
 
@@ -370,39 +376,17 @@ __interrupt void Mcbsp_RxINTB_ISR(void)
 
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
- * local_D_INTCH1_ISR - DMA ISR for channel 1 (INT7.1)
+ * DMA_FRAME_COMPLETE_ISR - DMA ISR for channel 6
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-__interrupt void RTDSP_DMA_CH1_ISR(void)
+
+//DMA interrupt -> modified from TI code
+__interrupt void DMA_FRAME_COMPLETE_ISR(void)
 {
     EALLOW;
-    DmaRegs.CH1.CONTROL.bit.HALT = 1;
 
-    ch1_flag = 1;
-    startDmaCh2(); // pong
-
-    // allow more interrupts on channel 1
-    PieCtrlRegs.PIEACK.all = PIEACK_GROUP7;
-    EDIS;
-    return;
-}
-
-/*
- * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
- * local_D_INTCH2_ISR - DMA ISR for channel 2 (INT7.2)
- * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
- */
-__interrupt void RTDSP_DMA_CH2_ISR(void)
-{
-    EALLOW;
-    DmaRegs.CH2.CONTROL.bit.HALT = 1;
-
-    ch2_flag = 1;
-    startDmaCh1(); // ping
-
-    // allow more interrupts on channel 2
-    PieCtrlRegs.PIEACK.all = PIEACK_GROUP7;
+    PieCtrlRegs.PIEACK.all |= PIEACK_GROUP7; // ACK to receive more interrupts from this PIE groups
     EDIS;
 
-    return;
+    StartDMACH6();
 }

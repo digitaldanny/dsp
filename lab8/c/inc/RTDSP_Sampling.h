@@ -40,6 +40,9 @@ typedef enum i2sSide
 #define CODEC_MCBSPB_INT_DIS    0
 #define CODEC_MCBSPB_INT_EN     1
 
+#define BURST 1
+#define TRANSFER 0
+
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  *                        GLOBALS
@@ -86,11 +89,19 @@ void initCodec(Uint16 mcbspIntEn);
 void init_dma(int16 * ping, int16 * pong, Uint32 transferSize);
 
 /*
- * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
- * SUMMARY: start_dma
- * Start DMA on channels 1 and 2
- * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: initDmaPingPong
+ * Initialize DMA for ping-pong sampling for word sizes == 16.
+ *
+ * INPUTS:
+ * ping - address of the first sample buffer
+ * pong - address of the second sample buffer
+ * transferSize - size of the frame to transfer before interrupting
+ *
+ * GLOBALS (must be declared in external file):
+ * __interrupt void local_D_INTCH6_ISR(void)
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
-void start_dma (void);
+void initDmaPingPong(int16 * ping, int16 * pong, Uint32 transferSize, void(*ISR)(void));
 
 #endif // SRC_RTDSP_SAMPLING_H_ //
