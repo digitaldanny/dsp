@@ -132,10 +132,13 @@ void initDmaPingPong(int16 * ping, int16 * pong, Uint32 transferSize, void(*ISR)
     // configure DMA CH6 -> modified from TI code
     DMACH6AddrConfig(DMA_CH6_Dest, DMA_CH6_Source);
     DMACH6BurstConfig(BURST,1,1);
-    DMACH6TransferConfig(transferSize-1,1,1);
+    DMACH6TransferConfig(transferSize-1,1,1); // go to next address - will be ignored when wrap occurs
     DMACH6ModeConfig(74,PERINT_ENABLE,ONESHOT_DISABLE,CONT_DISABLE,
                      SYNC_DISABLE,SYNC_SRC,OVRFLOW_DISABLE,SIXTEEN_BIT,
                      CHINT_END,CHINT_ENABLE);
+
+    // srcWrapSize, srcWrapStep, dstWrapSize, dstWrapStep
+    DMACH6WrapConfig(0x0000, 0x0000, transferSize-1, 0x0000);
 
     // ----------------------------------------------------------------------------
     // DMA_CH5: Configure this channel for sending processed data to codec audio out
@@ -149,10 +152,13 @@ void initDmaPingPong(int16 * ping, int16 * pong, Uint32 transferSize, void(*ISR)
     // configure DMA CH6 -> modified from TI code
     DMACH5AddrConfig(DMA_CH5_Dest, DMA_CH5_Source);
     DMACH5BurstConfig(BURST,1,1);
-    DMACH5TransferConfig(transferSize-1,1,1);
+    DMACH5TransferConfig(transferSize-1,1,1); // src, dst - SRC BUFFER should increment by transfer size
     DMACH5ModeConfig(74,PERINT_ENABLE,ONESHOT_DISABLE,CONT_DISABLE,
                      SYNC_DISABLE,SYNC_SRC,OVRFLOW_DISABLE,SIXTEEN_BIT,
                      CHINT_END,CHINT_DISABLE);
+
+    // srcWrapSize, srcWrapStep, dstWrapSize, dstWrapStep
+    DMACH5WrapConfig(transferSize-1, 0x0000, 0x0000, 0x0000);
 
     // ----------------------------------------------------------------------------
     // TRAILER

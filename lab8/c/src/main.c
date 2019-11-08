@@ -40,7 +40,7 @@
 
 typedef struct frame
 {
-    int16 buffer[SIZE_OF_DFT];        // stores all samples
+    int16 buffer[1024];               // buffer is large enough for a 512 point DFT using DMA
     Uint16 count;                     // current size of the buffer
     struct frame * nextFrame;         // points to the next frame for processing
     Uint16 waitingToProcess;          // 1 => do not switch to next frame, 0 => ready to switch frames
@@ -62,6 +62,8 @@ typedef struct polar
 void adcA0Init();
 void interruptInit();
 
+int16 avg2(int16 a, int16 b);
+void dftLR (int16*, float*, Uint16, Uint16);
 void dft (int16*, float*, Uint16, Uint16);
 polar_t searchMaxBin (float * bin, Uint16 len, float freqPerBin);
 
@@ -201,10 +203,10 @@ void main()
     // **************************************************//
     // initialize globals                                //
     // **************************************************//
-    frames[0].process       = &dft;                      //
+    frames[0].process       = &dftLR;                    //
     frames[0].nextFrame     = &frames[1];                //
                                                          //
-    frames[1].process       = &dft;                      //
+    frames[1].process       = &dftLR;                    //
     frames[1].nextFrame     = &frames[0];                //
                                                          //
     dftFrame                = &frames[0];                //
@@ -236,6 +238,22 @@ void main()
  */
 
 /*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: avg2
+ * This function averages together 2 int16 samples and
+ * returns an int16 result.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+int16 avg2(int16 a, int16 b)
+{
+    float af = (int16)a;
+    float bf = (int16)b;
+    af += bf;               // sum
+    af /= 2.0f;             // average
+    return (int16)af;       // package for output
+}
+
+/*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  * SUMMARY: dft
  * This function performs a 256 point dft on a buffer of samples and
@@ -258,7 +276,51 @@ void dft (int16 * buffer, float * bin, Uint16 numBins, Uint16 dftSize)
         for (Uint16 n = 0; n < dftSize; n++)
         {
             xn = (float)(*(buffer + n));
-            theta = (2.0f * M_PI * (float)k * (float)n) / 256.0f;
+            theta = (2.0f * M_PI * (float)k * (float)n) / (float)dftSize;
+
+            Re += xn*cosf(theta);
+            Im += xn*sinf(theta);
+        }
+
+        bin[k] = sqrtf(Re*Re + Im*Im);
+    }
+}
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: dftLR
+ * This function performs a dftSize point dft on a buffer of samples and
+ * returns a pointer to the resulting bin array. The expected input buffer
+ * order is as follows..
+ *
+ * buffer[2*dftSize] = {LEFT, RIGHT, LEFT, RIGHT, ...}
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void dftLR (int16 * buffer, float * bin, Uint16 numBins, Uint16 dftSize)
+{
+    float Re;
+    float Im;
+    float xn;
+    float theta;
+
+    int16 left;
+    int16 right;
+    int16 monoAudio;
+
+    for (Uint16 k = 0; k < numBins; k++)
+    {
+        Re = 0;
+        Im = 0;
+
+        // DFT for the selected bin (k)
+        for (Uint16 n = 0; n < dftSize; n++)
+        {
+            left = *(buffer + 2*n);
+            right = *(buffer + 2*n + 1);
+            monoAudio = avg2(left, right);
+
+            xn = (float)monoAudio;
+            theta = (2.0f * M_PI * (float)k * (float)n) / (float)dftSize;
 
             Re += xn*cosf(theta);
             Im += xn*sinf(theta);
