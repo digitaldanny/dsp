@@ -13,12 +13,16 @@
 #include "RTDSP.h"
 #include <math.h>
 
+#include "fpu.h"
+#include "dsp.h"
+#include "fpu32/fpu_cfft.h"
+
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  *                      CONFIGURATIONS
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  */
-#define PT2
+#define PT3
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -26,11 +30,15 @@
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
  */
 
-#pragma DATA_SECTION(frames, "share")  // DMA-accessible RAM
-
+// DFT related
 #define SIZE_OF_DFT     256
 #define NUM_DFT_BINS    128
 #define FREQ_PER_BIN    187.5f //(48000.0f / (float)SIZE_OF_DFT)
+
+// FFT related
+#define TEST_SIZE       (256U)
+#define FFT_STAGES      (8U)
+#define FFT_SIZE        (1 << FFT_STAGES)
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -40,7 +48,7 @@
 
 typedef struct frame
 {
-    int16 buffer[1024];               // buffer is large enough for a 512 point DFT using DMA
+    int16 buffer[2*SIZE_OF_DFT];      // buffer is large enough LR or mono processing
     Uint16 count;                     // current size of the buffer
     struct frame * nextFrame;         // points to the next frame for processing
     Uint16 waitingToProcess;          // 1 => do not switch to next frame, 0 => ready to switch frames
@@ -66,6 +74,7 @@ int16 avg2(int16 a, int16 b);
 void dftLR (int16*, float*, Uint16, Uint16);
 void dft (int16*, float*, Uint16, Uint16);
 polar_t searchMaxBin (float * bin, Uint16 len, float freqPerBin);
+void gpioTimerCheckInit();
 
 __interrupt void Mcbsp_RxINTB_ISR(void);
 __interrupt void DMA_FRAME_COMPLETE_ISR(void);
@@ -86,12 +95,34 @@ volatile int16 DataInMono;
 volatile Uint16 LR_received;
 
 // ping pong buffers
+#pragma DATA_SECTION(frames,        "DMAACCESSABLE")    // DMA-accessible RAM
 volatile Uint16 dma_flag;   // notifies program to begin dft computation
 frame_t frames[2];          // 2 buffers for ping-ponging processing and sampling
 frame_t * dftFrame;         // points at the frame to be processed
 frame_t * storeFrame;       // points at the frame to store new values
-float bin[NUM_DFT_BINS];    // stores result of dft256 function
 polar_t testPointMax;
+#if defined(PT1) || defined(PT2)
+float bin[NUM_DFT_BINS];    // stores result of dft256 function
+#endif
+
+#define CFFT_STAGES 8
+#define CFFT_SIZE   (1 << CFFT_STAGES)
+
+#pragma DATA_SECTION(CFFTin1Buff,"CFFTdata1");  //Buffer alignment,optional for CFFT_f32u - required by CFFT_f32
+float   CFFTin1Buff[CFFT_SIZE*2];
+
+#pragma DATA_SECTION(CFFTin2Buff,"CFFTdata2");  //Buffer alignment,optional for CFFT_f32u - required by CFFT_f32
+float   CFFTin2Buff[CFFT_SIZE*2];
+
+#pragma DATA_SECTION(CFFToutBuff,"CFFTdata3");  //Buffer alignment,optional for CFFT_f32u - required by CFFT_f32
+float   CFFToutBuff[CFFT_SIZE*2];
+
+#pragma DATA_SECTION(CFFTF32Coef,"CFFTdata4");  //Buffer alignment,optional for CFFT_f32u - required by CFFT_f32
+float   CFFTF32Coef[CFFT_SIZE];                 // Twiddle buffer
+
+float * binFft;
+
+CFFT_F32_STRUCT cfft;
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -186,6 +217,7 @@ void main()
     // sets up codec and processor for sampling at 48 KHz
     initDmaPingPong(&frames[0].buffer[0], &frames[1].buffer[0], SIZE_OF_DFT, &DMA_FRAME_COMPLETE_ISR);
     initCodec(CODEC_MCBSPB_INT_DIS);
+    gpioTimerCheckInit();
 
     // Enable global Interrupts and higher priority real-time debug events:
     EINT;  // Enable Global interrupt INTM
@@ -230,6 +262,143 @@ void main()
     }
 }
 #endif
+#ifdef PT3
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * This function implements 256 point FFT with DMA for
+ * ping-pong buffer switching.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void main()
+{
+    // ---------------------------------------------------------------------------------------
+
+    DINT;  // Enable Global interrupt INTM
+    DRTM;  // Enable Global realtime interrupt DBGM
+
+    InitSysCtrl();              // disable watchdog
+    InitPieCtrl();              // set PIE ctrl registers to default state
+    InitPieVectTable();         // set PIE vectors to default shell ISRs
+
+    // sets up codec and processor for sampling at 48 KHz
+    initDmaPingPong(&frames[0].buffer[0], &frames[1].buffer[0], SIZE_OF_DFT, &DMA_FRAME_COMPLETE_ISR);
+    initCodec(CODEC_MCBSPB_INT_DIS);
+    gpioTimerCheckInit();
+
+    // Enable global Interrupts and higher priority real-time debug events:
+    EINT;  // Enable Global interrupt INTM
+    ERTM;  // Enable Global realtime interrupt DBGM
+
+    // update frequencies on LCD
+    char s1[] = "Freq = XXXX Hz";
+    lcdRow1();
+    lcdString((Uint16 *)&s1);
+
+    char s2[] = "Mag = XXXX dB";
+    lcdRow2();
+    lcdString((Uint16 *)&s2);
+
+    // ---------------------------------------------------------------------------------------
+
+    // Configure the FFT object
+    // CFFT_f32_setOutputPtr(&cfft, (float*)&CFFToutBuff);
+    // CFFT_f32_setStages(&cfft, FFT_STAGES);
+    // CFFT_f32_setFFTSize(&cfft, FFT_SIZE);
+    // CFFT_f32_setTwiddlesPtr(&cfft, (float*)&CFFTF32Coef);
+    // CFFT_f32_sincostable(&cfft);
+
+    cfft.CoefPtr = CFFTF32Coef;             //Twiddle factor table
+    cfft.InPtr = CFFTin1Buff;               //Input/output or middle stage of ping-pong buffer
+    cfft.OutPtr = CFFToutBuff;              //Output or middle stage of ping-pong buffer
+    cfft.Stages = CFFT_STAGES;              // FFT stages
+    cfft.FFTSize = CFFT_SIZE;               // FFT size
+    CFFT_f32_sincostable(&cfft);            // Calculate twiddle factor
+
+    // **************************************************//
+    // initialize globals                                //
+    // **************************************************//
+    frames[0].process       = &dftLR;                    //
+    frames[0].nextFrame     = &frames[1];                //
+                                                         //
+    frames[1].process       = &dftLR;                    //
+    frames[1].nextFrame     = &frames[0];                //
+                                                         //
+    dftFrame                = &frames[0];                //
+    dma_flag                = 0;                         //
+    // **************************************************//
+
+    // ---------------------------------------------------------------------------------------
+
+    while(1)
+    {
+        if (dma_flag)
+        {
+            // Store input samples into CFFTin1Buff:
+            //     CFFTin1Buff[0] = real[0]
+            //     CFFTin1Buff[1] = imag[0]
+            //     CFFTin1Buff[2] = real[1]
+            //     ………
+            //     CFFTin1Buff[N] = real[N/2]
+            //     CFFTin1Buff[N+1] = imag[N/2]
+            //     ………
+            //     CFFTin1Buff[2N-3] = imag[N-2]
+            //     CFFTin1Buff[2N-2] = real[N-1]
+            //     CFFTin1Buff[2N-1] = imag[N-1]
+
+            // convert int16 LR samples to float mono samples
+            for (Uint16 i = 0; i < sizeof(dftFrame->buffer); i+=2)
+            {
+                CFFTin1Buff[i] = ((float)dftFrame->buffer[i] + (float)dftFrame->buffer[i+1])/2.0f; // real
+                CFFTin1Buff[i+1] = CFFTin1Buff[i]; // imaginary
+            }
+
+            // ---------------------------------------------------------------------------------------
+            //
+            // //===========================================================================
+            // // CFFT result:
+            // //     CurrentInPtr[0] = real[0]
+            // //     CurrentInPtr[1] = imag[0]
+            // //     CurrentInPtr[2] = real[1]
+            // //     ………
+            // //     CurrentInPtr[N] = real[N/2]
+            // //     CurrentInPtr[N+1] = imag[N/2]
+            // //     ………
+            // //     CurrentInPtr[2N-3] = imag[N-2]
+            // //     CurrentInPtr[2N-2] = real[N-1]
+            // //     CurrentInPtr[2N-1] = imag[N-1]
+            // //
+            // //=============================================================================
+            //
+            //     CFFT_f32(&cfft);                        // Calculate FFT
+
+            //
+            // Note: To calculate magnitude, the input data is pointed by cfft.CurrentInPtr.
+            //       The calculated magnitude is stored in the memory pointed by
+            //       cfft.CurrentOutPtr. If not changing cfft.CurrentOutPtr after called
+            //       magnitude calculation function, the output buffer would be overwrite
+            //       right after phase calculation function called.
+            //
+            //       If Stages is ODD, the currentInPtr=CFFTin1Buff, currentOutPtr=CFFToutBuff
+            //       If Stages is Even, the currentInPtr=CFFToutBuff, currentOutPtr=CFFTin1Buff
+            //
+
+            // Calculate Magnitude:
+            CFFT_f32_mag(&cfft);                    // Calculate magnitude, result stored in CurrentOutPtr
+
+            // ---------------------------------------------------------------------------------------
+
+            // next frame to be processed
+            dftFrame = dftFrame->nextFrame;
+
+            // search bins for the max frequency and display info to LCD
+            binFft = CFFT_f32_getCurrOutputPtr(&cfft);
+            testPointMax = searchMaxBin (binFft, NUM_DFT_BINS, FREQ_PER_BIN);
+
+            dma_flag = 0;
+        }
+    }
+}
+#endif
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -262,6 +431,8 @@ int16 avg2(int16 a, int16 b)
  */
 void dft (int16 * buffer, float * bin, Uint16 numBins, Uint16 dftSize)
 {
+    GpioDataRegs.GPDDAT.bit.GPIO122 = 1;
+
     float Re;
     float Im;
     float xn;
@@ -284,6 +455,8 @@ void dft (int16 * buffer, float * bin, Uint16 numBins, Uint16 dftSize)
 
         bin[k] = sqrtf(Re*Re + Im*Im);
     }
+
+    GpioDataRegs.GPDDAT.bit.GPIO122 = 0;
 }
 
 /*
@@ -298,6 +471,8 @@ void dft (int16 * buffer, float * bin, Uint16 numBins, Uint16 dftSize)
  */
 void dftLR (int16 * buffer, float * bin, Uint16 numBins, Uint16 dftSize)
 {
+    GpioDataRegs.GPDDAT.bit.GPIO122 = 1;
+
     float Re;
     float Im;
     float xn;
@@ -328,6 +503,8 @@ void dftLR (int16 * buffer, float * bin, Uint16 numBins, Uint16 dftSize)
 
         bin[k] = sqrtf(Re*Re + Im*Im);
     }
+
+    GpioDataRegs.GPDDAT.bit.GPIO122 = 0;
 }
 
 /*
@@ -402,6 +579,36 @@ polar_t searchMaxBin (float * bin, Uint16 len, float freqPerBin)
     conversion.freq = maxFreq;
     return conversion;
 }
+
+/*
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ * SUMMARY: This function is used to initialize a gpio
+ * to be an output. This is used to probe the board and
+ * check that the interrupt is triggering at the time
+ * expected.
+ * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+ */
+void gpioTimerCheckInit()
+{
+    EALLOW;
+
+    // timer probe
+    GpioDataRegs.GPDDAT.bit.GPIO122 = 1;
+    GpioDataRegs.GPDDAT.bit.GPIO122 = 1;
+    GpioCtrlRegs.GPDDIR.bit.GPIO122 = GPIO_DIR_MODE_OUT;
+    GpioCtrlRegs.GPDGMUX2.bit.GPIO122 = 0x0000;
+    GpioCtrlRegs.GPDMUX2.bit.GPIO122 = 0x0000;
+    GpioCtrlRegs.GPDPUD.bit.GPIO122 = 0x0000;
+
+    // mcbsp probe
+    GpioDataRegs.GPDDAT.bit.GPIO123 = 1;
+    GpioDataRegs.GPDDAT.bit.GPIO123 = 1;
+    GpioCtrlRegs.GPDDIR.bit.GPIO123 = GPIO_DIR_MODE_OUT;
+    GpioCtrlRegs.GPDGMUX2.bit.GPIO123 = 0x0000;
+    GpioCtrlRegs.GPDMUX2.bit.GPIO123 = 0x0000;
+    GpioCtrlRegs.GPDPUD.bit.GPIO123 = 0x0000;
+}
+
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
