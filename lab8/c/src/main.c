@@ -105,8 +105,9 @@ polar_t testPointMax;
 float bin[NUM_DFT_BINS];    // stores result of dft256 function
 #endif
 
-#define CFFT_STAGES 8
-#define CFFT_SIZE   (1 << CFFT_STAGES)
+#define CFFT_STAGES         6  // 64 point FFT, frequency resolution = 48000/64 = 750
+#define CFFT_SIZE           (1 << CFFT_STAGES)
+#define CFFT_FREQ_PER_BIN   750.0f
 
 #pragma DATA_SECTION(CFFTin1Buff,"CFFTdata1");  //Buffer alignment,optional for CFFT_f32u - required by CFFT_f32
 float   CFFTin1Buff[CFFT_SIZE*2];
@@ -300,16 +301,7 @@ void main()
 
     // ---------------------------------------------------------------------------------------
 
-    // Configure the FFT object
-    // CFFT_f32_setOutputPtr(&cfft, (float*)&CFFToutBuff);
-    // CFFT_f32_setStages(&cfft, FFT_STAGES);
-    // CFFT_f32_setFFTSize(&cfft, FFT_SIZE);
-    // CFFT_f32_setTwiddlesPtr(&cfft, (float*)&CFFTF32Coef);
-    // CFFT_f32_sincostable(&cfft);
-
     cfft.CoefPtr = CFFTF32Coef;             //Twiddle factor table
-    cfft.InPtr = CFFTin1Buff;               //Input/output or middle stage of ping-pong buffer
-    cfft.OutPtr = CFFToutBuff;              //Output or middle stage of ping-pong buffer
     cfft.Stages = CFFT_STAGES;              // FFT stages
     cfft.FFTSize = CFFT_SIZE;               // FFT size
     CFFT_f32_sincostable(&cfft);            // Calculate twiddle factor
@@ -333,6 +325,9 @@ void main()
     {
         if (dma_flag)
         {
+            cfft.InPtr = CFFTin1Buff;  //Input/output or middle stage of ping-pong buffer
+            cfft.OutPtr = CFFToutBuff; //Output or middle stage of ping-pong buffer
+
             // Store input samples into CFFTin1Buff:
             //     CFFTin1Buff[0] = real[0]
             //     CFFTin1Buff[1] = imag[0]
@@ -353,23 +348,23 @@ void main()
             }
 
             // ---------------------------------------------------------------------------------------
+
+            //===========================================================================
+            // CFFT result:
+            //     CurrentInPtr[0] = real[0]
+            //     CurrentInPtr[1] = imag[0]
+            //     CurrentInPtr[2] = real[1]
+            //     ………
+            //     CurrentInPtr[N] = real[N/2]
+            //     CurrentInPtr[N+1] = imag[N/2]
+            //     ………
+            //     CurrentInPtr[2N-3] = imag[N-2]
+            //     CurrentInPtr[2N-2] = real[N-1]
+            //     CurrentInPtr[2N-1] = imag[N-1]
             //
-            // //===========================================================================
-            // // CFFT result:
-            // //     CurrentInPtr[0] = real[0]
-            // //     CurrentInPtr[1] = imag[0]
-            // //     CurrentInPtr[2] = real[1]
-            // //     ………
-            // //     CurrentInPtr[N] = real[N/2]
-            // //     CurrentInPtr[N+1] = imag[N/2]
-            // //     ………
-            // //     CurrentInPtr[2N-3] = imag[N-2]
-            // //     CurrentInPtr[2N-2] = real[N-1]
-            // //     CurrentInPtr[2N-1] = imag[N-1]
-            // //
-            // //=============================================================================
-            //
-            //     CFFT_f32(&cfft);                        // Calculate FFT
+            //=============================================================================
+
+            CFFT_f32(&cfft);
 
             //
             // Note: To calculate magnitude, the input data is pointed by cfft.CurrentInPtr.
@@ -383,17 +378,16 @@ void main()
             //
 
             // Calculate Magnitude:
-            CFFT_f32_mag(&cfft);                    // Calculate magnitude, result stored in CurrentOutPtr
+            CFFT_f32s_mag(&cfft); // Calculate magnitude, result stored in CurrentOutPtr
 
             // ---------------------------------------------------------------------------------------
 
-            // next frame to be processed
-            dftFrame = dftFrame->nextFrame;
-
             // search bins for the max frequency and display info to LCD
             binFft = CFFT_f32_getCurrOutputPtr(&cfft);
-            testPointMax = searchMaxBin (binFft, NUM_DFT_BINS, FREQ_PER_BIN);
+            testPointMax = searchMaxBin (binFft, CFFT_SIZE >> 1, CFFT_FREQ_PER_BIN);
 
+            // next frame to be processed
+            dftFrame = dftFrame->nextFrame;
             dma_flag = 0;
         }
     }
