@@ -1,9 +1,9 @@
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  * | SUMMARY: main.c                                                 |
- * | This program runs a LPF, HPF, and BPF in real time on the input |
- * | sound from the line in. The filter can be selected using the    |
- * | 3 codec push buttons.                                           |
+ * | This program can be configured to perform 64, 256, or 512 point |
+ * | DFT/FFT calculations of an input signal and output the max      |
+ * | frequency and gain on the LCD.                                  |
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
  */
 
@@ -194,6 +194,7 @@ void main()
     }
 }
 #endif
+
 #ifdef PT2
 /*
  * +-----+-----+-----+-----+-----+-----+-----+-----+-----+
