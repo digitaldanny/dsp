@@ -31,14 +31,9 @@
  */
 
 // DFT related
-#define SIZE_OF_DFT     256
-#define NUM_DFT_BINS    128
-#define FREQ_PER_BIN    187.5f //(48000.0f / (float)SIZE_OF_DFT)
-
-// FFT related
-#define TEST_SIZE       (256U)
-#define FFT_STAGES      (8U)
-#define FFT_SIZE        (1 << FFT_STAGES)
+#define SIZE_OF_DFT     512
+#define NUM_DFT_BINS    (SIZE_OF_DFT / 2)
+#define FREQ_PER_BIN    (48000.0f / (float)SIZE_OF_DFT)
 
 /*
  * +=====+=====+=====+=====+=====+=====+=====+=====+=====+
@@ -95,7 +90,7 @@ volatile int16 DataInMono;
 volatile Uint16 LR_received;
 
 // ping pong buffers
-#pragma DATA_SECTION(frames,        "DMAACCESSABLE")    // DMA-accessible RAM
+#pragma DATA_SECTION(frames, "DMAACCESSABLE")    // DMA-accessible RAM
 volatile Uint16 dma_flag;   // notifies program to begin dft computation
 frame_t frames[2];          // 2 buffers for ping-ponging processing and sampling
 frame_t * dftFrame;         // points at the frame to be processed
@@ -105,9 +100,9 @@ polar_t testPointMax;
 float bin[NUM_DFT_BINS];    // stores result of dft256 function
 #endif
 
-#define CFFT_STAGES         6  // 64 point FFT, frequency resolution = 48000/64 = 750
+#define CFFT_STAGES         9  // 64 point FFT, frequency resolution = 48000/64 = 750
 #define CFFT_SIZE           (1 << CFFT_STAGES)
-#define CFFT_FREQ_PER_BIN   750.0f
+#define CFFT_FREQ_PER_BIN   (48000.0f / (float)CFFT_SIZE)
 
 #pragma DATA_SECTION(CFFTin1Buff,"CFFTdata1");  //Buffer alignment,optional for CFFT_f32u - required by CFFT_f32
 float   CFFTin1Buff[CFFT_SIZE*2];
@@ -277,9 +272,9 @@ void main()
     DINT;  // Enable Global interrupt INTM
     DRTM;  // Enable Global realtime interrupt DBGM
 
-    InitSysCtrl();              // disable watchdog
-    InitPieCtrl();              // set PIE ctrl registers to default state
-    InitPieVectTable();         // set PIE vectors to default shell ISRs
+    InitSysCtrl();      // disable watchdog
+    InitPieCtrl();      // set PIE ctrl registers to default state
+    InitPieVectTable(); // set PIE vectors to default shell ISRs
 
     // sets up codec and processor for sampling at 48 KHz
     initDmaPingPong(&frames[0].buffer[0], &frames[1].buffer[0], SIZE_OF_DFT, &DMA_FRAME_COMPLETE_ISR);
@@ -309,10 +304,8 @@ void main()
     // **************************************************//
     // initialize globals                                //
     // **************************************************//
-    frames[0].process       = &dftLR;                    //
     frames[0].nextFrame     = &frames[1];                //
                                                          //
-    frames[1].process       = &dftLR;                    //
     frames[1].nextFrame     = &frames[0];                //
                                                          //
     dftFrame                = &frames[0];                //
@@ -333,57 +326,27 @@ void main()
             //     CFFTin1Buff[1] = imag[0]
             //     CFFTin1Buff[2] = real[1]
             //     ………
-            //     CFFTin1Buff[N] = real[N/2]
-            //     CFFTin1Buff[N+1] = imag[N/2]
-            //     ………
             //     CFFTin1Buff[2N-3] = imag[N-2]
             //     CFFTin1Buff[2N-2] = real[N-1]
             //     CFFTin1Buff[2N-1] = imag[N-1]
 
             // convert int16 LR samples to float mono samples
-            for (Uint16 i = 0; i < sizeof(dftFrame->buffer); i+=2)
+            for (Uint16 i = 0; i < 2*CFFT_SIZE; i+=2)
             {
                 CFFTin1Buff[i] = ((float)dftFrame->buffer[i] + (float)dftFrame->buffer[i+1])/2.0f; // real
                 CFFTin1Buff[i+1] = CFFTin1Buff[i]; // imaginary
             }
 
-            // ---------------------------------------------------------------------------------------
-
-            //===========================================================================
-            // CFFT result:
-            //     CurrentInPtr[0] = real[0]
-            //     CurrentInPtr[1] = imag[0]
-            //     CurrentInPtr[2] = real[1]
-            //     ………
-            //     CurrentInPtr[N] = real[N/2]
-            //     CurrentInPtr[N+1] = imag[N/2]
-            //     ………
-            //     CurrentInPtr[2N-3] = imag[N-2]
-            //     CurrentInPtr[2N-2] = real[N-1]
-            //     CurrentInPtr[2N-1] = imag[N-1]
-            //
-            //=============================================================================
-
+            GpioDataRegs.GPDDAT.bit.GPIO122 = 1;
             CFFT_f32(&cfft);
-
-            //
-            // Note: To calculate magnitude, the input data is pointed by cfft.CurrentInPtr.
-            //       The calculated magnitude is stored in the memory pointed by
-            //       cfft.CurrentOutPtr. If not changing cfft.CurrentOutPtr after called
-            //       magnitude calculation function, the output buffer would be overwrite
-            //       right after phase calculation function called.
-            //
-            //       If Stages is ODD, the currentInPtr=CFFTin1Buff, currentOutPtr=CFFToutBuff
-            //       If Stages is Even, the currentInPtr=CFFToutBuff, currentOutPtr=CFFTin1Buff
-            //
-
-            // Calculate Magnitude:
-            CFFT_f32s_mag(&cfft); // Calculate magnitude, result stored in CurrentOutPtr
+            CFFT_f32s_mag(&cfft); // requires CFFT_f32 to run first, result stored in CurrentOutPtr
+            GpioDataRegs.GPDDAT.bit.GPIO122 = 0;
 
             // ---------------------------------------------------------------------------------------
 
             // search bins for the max frequency and display info to LCD
-            binFft = CFFT_f32_getCurrOutputPtr(&cfft);
+            binFft = CFFT_f32_getCurrOutputPtr(&cfft); // currentInput stores result for EVEN number of FFT stages
+
             testPointMax = searchMaxBin (binFft, CFFT_SIZE >> 1, CFFT_FREQ_PER_BIN);
 
             // next frame to be processed
@@ -537,7 +500,7 @@ polar_t searchMaxBin (float * bin, Uint16 len, float freqPerBin)
     float hundredths   = (tenths - (Uint16)tenths) * 10;
 
     // Convert voltage to characters and store to the LCD
-    wr[0] = INT_TO_ASCII((Uint16)tens);
+    wr[0] = INT_TO_ASCII((Uint16)tens + 0.5f);
     wr[1] = INT_TO_ASCII((Uint16)ones); // 1's place (Ex. [1].23)
     wr[2] = '.';
     wr[3] = INT_TO_ASCII((Uint16)tenths); // 10th's place (Ex. 1.[2]3)
